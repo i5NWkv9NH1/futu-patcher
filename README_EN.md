@@ -18,7 +18,7 @@ A clean, interactive CLI utility built with **Rust 2024 Edition** to patch and d
 | **Tech Stack** | Qt 5/6 + CEF (Chromium) | Native macOS Cocoa (AppKit) |
 | **Maintenance** | Actively maintained by Futu | Discontinued (`brew install --cask futubull@legacy`) |
 | **Injection** | Pure Rust Mach-O tail `LC_LOAD_DYLIB` | Pure Rust Mach-O tail `LC_LOAD_DYLIB` |
-| **Telemetry Hooks** | Patches `F3CReport` & `libFTApmKit` | Patches `F3CReport` & `Firebase` |
+| **Telemetry Hooks** | Patches `F3CReport`, `libFTApmKit`, and `F3CLogUploader` | Patches `F3CReport` & `Firebase` |
 | **Space Saved** | ~**918 MB** (`1.84 GB -> 966 MB`, reduced by ~`48.7%`) | ~**178 MB** (`457 MB -> 279 MB`, reduced by ~`39.0%`) |
 
 ---
@@ -67,5 +67,5 @@ PROCESS-NAME,FutuNiuniu,DIRECT
 When Futubull updates, use diagnostics mode to inspect bundle changes:
 
 1. **Inspect Bundle**: Run `./target/release/futu-patcher -i`. The tool displays bundle version, sizes of internal components, `FTNN` dependencies, and telemetry symbols in `F3CReport`, `libFTApmKit`, and `F3CLogUploader`.
-2. **Review Symbols**: If Futu changed telemetry function names, update the matched symbol names in `patches/futubull_patch.m`.
+2. **Review Symbols**: If Futu changed telemetry function names, update the matched symbol names in `patches/futu_hook.rs`.
 3. **Re-apply Patch**: Run `sudo futu-patcher` to compile and apply patches.

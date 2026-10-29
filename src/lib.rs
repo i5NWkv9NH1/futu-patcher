@@ -160,7 +160,7 @@ pub fn print_summary_report(reports: &[PatchReport]) {
         if let Some(st) = r.inject_status {
             let desc = match st {
                 macho::InjectResult::Injected => "成功追加至加载表末尾",
-                macho::InjectResult::AlreadyPresent => "已就绪 (无需重复写入)",
+                macho::InjectResult::AlreadyPresent => "已更新补丁动态库 (加载表已就绪)",
                 macho::InjectResult::FixedAndInjected => "修复错位项并重写至末尾",
             };
             println!("  补丁状态: {}", style(desc).cyan());

@@ -18,7 +18,7 @@
 | **技术栈** | Qt 5/6 + CEF (Chromium) | 原生 macOS Cocoa (AppKit) |
 | **维护状态** | 官方持续维护 | 官方已停更 (`brew install --cask futubull@legacy`) |
 | **注入方式** | 纯 Rust Mach-O 尾部 `LC_LOAD_DYLIB` | 纯 Rust Mach-O 尾部 `LC_LOAD_DYLIB` |
-| **拦截策略** | 屏蔽 `F3CReport` 与 `libFTApmKit` | 屏蔽 `F3CReport` 与 `Firebase` |
+| **拦截策略** | 屏蔽 `F3CReport`、`libFTApmKit` 与 `F3CLogUploader` | 屏蔽 `F3CReport` 与 `Firebase` |
 | **实测节省空间** | 约 **918 MB** (`1.84 GB -> 966 MB`，减少约 `48.7%`) | 约 **178 MB** (`457 MB -> 279 MB`，减少约 `39.0%`) |
 
 ---
@@ -67,5 +67,5 @@ PROCESS-NAME,FutuNiuniu,DIRECT
 当富途牛牛新版更新后，可通过诊断模式辅助定位变动：
 
 1. **探测新版结构**：运行 `./target/release/futu-patcher -i`，工具会自动读取版本号、统计包内组件体积、导出 `FTNN` 依赖列表，并扫描 `F3CReport`、`libFTApmKit` 与 `F3CLogUploader` 内部的上报与监控符号。
-2. **核对符号变动**：若富途调整了埋点函数命名，将诊断输出中的新符号同步更新至 `patches/futubull_patch.m` 的 `on_image_loaded` 逻辑中。
+2. **核对符号变动**：若富途调整了埋点函数命名，将诊断输出中的新符号同步更新至 `patches/futu_hook.rs` 的 `patch_f3c_report` 或 `patch_ft_apm` 逻辑中。
 3. **重新打补丁**：运行 `sudo futu-patcher` 即可自动完成编译与注入。

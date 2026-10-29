@@ -11,9 +11,8 @@ use crate::cleaner::{
 };
 use crate::macho::{InjectResult, inject_file};
 
-// * 针对新版与经典版内嵌的 Objective-C 补丁源码
-const FUTUBULL_PATCH_SOURCE: &str = include_str!("../patches/futubull_patch.m");
-const FUTUNIUNIU_PATCH_SOURCE: &str = include_str!("../patches/futuniuniu_patch.m");
+// * 内嵌的纯 Rust 动态库补丁源码
+const PATCH_SOURCE: &str = include_str!("../patches/futu_hook.rs");
 
 // * 支持的目标富途客户端枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,14 +43,6 @@ impl FutuApp {
     // * 获取 Frameworks 目录路径
     pub fn frameworks_path(&self) -> PathBuf {
         self.app_path().join("Contents/Frameworks")
-    }
-
-    // * 获取对应的 Objective-C 补丁源码字符串
-    pub fn patch_source(&self) -> &'static str {
-        match self {
-            Self::Futubull => FUTUBULL_PATCH_SOURCE,
-            Self::FutuNiuniu => FUTUNIUNIU_PATCH_SOURCE,
-        }
     }
 
     // * 客户端显示名称
@@ -115,37 +106,45 @@ pub struct PatchReport {
     pub thinned_count: usize,
 }
 
-// * 检查编译工具链 clang 是否就绪
-pub fn check_clang_installed() -> bool {
-    Command::new("/usr/bin/clang")
+// * 检查编译工具链 rustc 是否就绪
+pub fn check_rustc_installed() -> bool {
+    Command::new("rustc")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
-// * 编译内嵌的 Objective-C 补丁为动态库 libfutu_patch.dylib
-pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(), String> {
+// * 编译内嵌的纯 Rust 补丁源码为动态库 libfutu_patch.dylib
+pub fn compile_patch_dylib(output_dylib: &Path) -> Result<(), String> {
     let temp_dir = std::env::temp_dir();
-    let temp_src = temp_dir.join(format!("futu_patch_{}.m", std::process::id()));
+    let temp_src = temp_dir.join(format!("futu_hook_{}.rs", std::process::id()));
 
     // * 将源码写出到临时目录
-    if let Err(e) = fs::write(&temp_src, source_code) {
+    if let Err(e) = fs::write(&temp_src, PATCH_SOURCE) {
         return Err(format!("写入临时补丁源码失败: {e}"));
     }
 
-    debug!("调用 clang 编译动态库: {}", output_dylib.display());
+    debug!(
+        "调用 rustc 编译纯 Rust 补丁动态库: {}",
+        output_dylib.display()
+    );
 
-    // * 使用 /usr/bin/clang 进行编译
-    let output = Command::new("/usr/bin/clang")
-        .arg("-O3")
-        .arg("-dynamiclib")
-        .arg("-Wall")
-        .arg("-Wl,-install_name,@rpath/libfutu_patch.dylib")
-        .arg("-framework")
-        .arg("Foundation")
-        .arg("-framework")
-        .arg("AppKit")
+    // * 使用 rustc 进行编译
+    let output = Command::new("rustc")
+        .arg("--edition=2024")
+        .arg("--crate-type=cdylib")
+        .arg("-O")
+        .arg("-C")
+        .arg("panic=abort")
+        .arg("-C")
+        .arg("link-arg=-Wl,-install_name,@rpath/libfutu_patch.dylib")
+        .arg("-l")
+        .arg("objc")
+        .arg("-l")
+        .arg("framework=Foundation")
+        .arg("-l")
+        .arg("framework=AppKit")
         .arg(&temp_src)
         .arg("-o")
         .arg(output_dylib)
@@ -157,19 +156,17 @@ pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(),
     match output {
         Ok(out) => {
             if out.status.success() {
-                debug!("动态库编译成功");
+                debug!("补丁动态库编译成功");
                 Ok(())
             } else {
                 let stderr = String::from_utf8_lossy(&out.stderr);
-                error!("clang 编译报错:\n{stderr}");
-                Err(format!("clang 编译失败: {stderr}"))
+                error!("rustc 编译报错:\n{stderr}");
+                Err(format!("rustc 编译失败: {stderr}"))
             }
         }
         Err(e) => {
-            error!("无法启动 /usr/bin/clang: {e}");
-            Err(format!(
-                "无法执行 /usr/bin/clang，请先安装 Xcode Command Line Tools: {e}"
-            ))
+            error!("无法启动 rustc: {e}");
+            Err(format!("无法执行 rustc，请确保已安装 Rust 工具链: {e}"))
         }
     }
 }
@@ -253,7 +250,7 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
     if options.core_patch {
         let temp_dylib =
             std::env::temp_dir().join(format!("libfutu_patch_{}.dylib", std::process::id()));
-        compile_patch_dylib(app.patch_source(), &temp_dylib)?;
+        compile_patch_dylib(&temp_dylib)?;
 
         // * 部署动态库到 App 的 Contents/Frameworks/ 目录
         let target_dylib = app.frameworks_path().join("libfutu_patch.dylib");
@@ -276,7 +273,7 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
                         info!("已追加 @rpath/libfutu_patch.dylib 至加载表末尾")
                     }
                     InjectResult::AlreadyPresent => {
-                        info!("动态库已在加载表末尾，无需重复写入")
+                        info!("已更新补丁动态库 libfutu_patch.dylib (加载表已就绪)")
                     }
                     InjectResult::FixedAndInjected => {
                         info!("已修复错位项并重写至加载表末尾")
