@@ -51,12 +51,18 @@ pub fn find_arm64_slice_offset(data: &[u8]) -> Result<usize, MachoError> {
     let magic = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
 
     if magic == FAT_MAGIC || magic == FAT_CIGAM {
-        debug!("🔍 检测到 Universal 通用二进制 (FAT 容器)");
+        debug!("检测到 Universal 通用二进制 (FAT 容器)");
         // ! FAT 头部中所有整数字段一律按大端字节序 (Big-Endian) 存储
         if data.len() < 8 {
             return Err(MachoError::Corrupted("FAT 头部长度不足".to_string()));
         }
         let nfat_arch = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize;
+        // ! 校验架构切片数量：边界在 1..=8 之间，防止与使用相同 0xCAFEBABE 魔数的 Java .class 文件冲突
+        if nfat_arch == 0 || nfat_arch > 8 {
+            return Err(MachoError::Corrupted(format!(
+                "FAT 架构数量异常 ({nfat_arch})，可能为非 Mach-O 文件"
+            )));
+        }
         let mut offset = 8;
 
         for _ in 0..nfat_arch {
@@ -77,17 +83,17 @@ pub fn find_arm64_slice_offset(data: &[u8]) -> Result<usize, MachoError> {
             ]) as usize;
 
             if cputype == CPU_TYPE_ARM64 {
-                debug!("🔍 成功定位 arm64 切片，偏移地址: 0x{slice_offset:x}");
+                debug!("成功定位 arm64 切片，偏移地址: 0x{slice_offset:x}");
                 return Ok(slice_offset);
             }
             offset += 20;
         }
         Err(MachoError::Arm64SliceNotFound)
     } else if magic == MH_MAGIC_64 || magic == MH_CIGAM_64 {
-        debug!("🔍 检测到单架构 Thin 64位 Mach-O 二进制");
+        debug!("检测到单架构 Thin 64位 Mach-O 二进制");
         Ok(0)
     } else {
-        error!("❌ 未知或不支持的二进制魔数: 0x{magic:x}");
+        error!("未知或不支持的二进制魔数: 0x{magic:x}");
         Err(MachoError::UnsupportedMagic(magic))
     }
 }
@@ -195,12 +201,12 @@ pub fn inject_slice(
                     if parsed_name == dylib_path {
                         // * 如果位于最末尾一条，说明已经打好补丁
                         if i == ncmds - 1 {
-                            debug!("🔍 补丁已存在于加载表最末尾，无需重复写入");
+                            debug!("补丁已存在于加载表最末尾，无需重复写入");
                             return Ok(InjectResult::AlreadyPresent);
                         }
 
                         // ! 如果不在末尾，将其从原位置抹去并前移后续命令
-                        warn!("⚠️ 检测到错位项，正在剔除并重排加载命令表...");
+                        warn!("检测到错位项，正在剔除并重排加载命令表...");
                         let copy_src = cursor + cmdsize;
                         let copy_len = cmds_end - copy_src;
                         data.copy_within(copy_src..copy_src + copy_len, cursor);
@@ -228,10 +234,10 @@ pub fn inject_slice(
         return Err(MachoError::NoSpaceAvailable);
     }
 
-    // ! 关键安全审计门禁：校验即将写入的区域是否全为 0（确保处于合法的 Header Padding 空白区，绝不覆盖后续代码段）
+    // ! 检查即将写入的区域是否全为 0，防止覆盖后续代码段
     let target_range = cmds_end..cmds_end + add_cmdsize as usize;
     if data[target_range.clone()].iter().any(|&b| b != 0) {
-        error!("❌ Mach-O 头部预留填充区包含非零数据，为保护后续代码段已终止写入！");
+        error!("Mach-O 头部预留填充区包含非零数据，为保护后续代码段已终止写入");
         return Err(MachoError::HeaderPaddingNotZero);
     }
 
@@ -259,10 +265,10 @@ pub fn inject_slice(
     data[slice_offset + 20..slice_offset + 24].copy_from_slice(&sizeofcmds.to_le_bytes());
 
     if fixed_misplaced {
-        debug!("🔍 修复错位项并追加「{dylib_path}」至加载表末尾");
+        debug!("修复错位项并追加「{dylib_path}」至加载表末尾");
         Ok(InjectResult::FixedAndInjected)
     } else {
-        debug!("🔍 成功追加「{dylib_path}」至加载表末尾");
+        debug!("成功追加「{dylib_path}」至加载表末尾");
         Ok(InjectResult::Injected)
     }
 }
@@ -270,7 +276,7 @@ pub fn inject_slice(
 // * 对指定二进制文件执行加载表注入
 pub fn inject_file<P: AsRef<Path>>(path: P, dylib_path: &str) -> Result<InjectResult, MachoError> {
     let path_ref = path.as_ref();
-    debug!("🔍 读取并解析二进制文件: {}", path_ref.display());
+    debug!("读取并解析二进制文件: {}", path_ref.display());
 
     let mut data = fs::read(path_ref)?;
     let slice_offset = find_arm64_slice_offset(&data)?;
@@ -278,7 +284,7 @@ pub fn inject_file<P: AsRef<Path>>(path: P, dylib_path: &str) -> Result<InjectRe
 
     if result != InjectResult::AlreadyPresent {
         fs::write(path_ref, &data)?;
-        debug!("🔍 写入更新后的二进制数据完成: {}", path_ref.display());
+        debug!("写入更新后的二进制数据完成: {}", path_ref.display());
     }
 
     Ok(result)

@@ -41,14 +41,6 @@ impl FutuApp {
         }
     }
 
-    // * 获取可能残留的历史 .real 备份文件路径
-    pub fn real_binary_path(&self) -> PathBuf {
-        match self {
-            Self::Futubull => self.app_path().join("Contents/MacOS/FTNN.real"),
-            Self::FutuNiuniu => self.app_path().join("Contents/MacOS/FutuNiuniu.real"),
-        }
-    }
-
     // * 获取 Frameworks 目录路径
     pub fn frameworks_path(&self) -> PathBuf {
         self.app_path().join("Contents/Frameworks")
@@ -121,7 +113,6 @@ pub struct PatchReport {
     pub removed_components: Vec<String>,
     pub pruned_locales: Vec<String>,
     pub thinned_count: usize,
-    pub restored_real: bool,
 }
 
 // * 检查编译工具链 clang 是否就绪
@@ -143,7 +134,7 @@ pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(),
         return Err(format!("写入临时补丁源码失败: {e}"));
     }
 
-    debug!("🔍 调用 clang 编译动态库: {}", output_dylib.display());
+    debug!("调用 clang 编译动态库: {}", output_dylib.display());
 
     // * 使用 /usr/bin/clang 进行编译
     let output = Command::new("/usr/bin/clang")
@@ -166,16 +157,16 @@ pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(),
     match output {
         Ok(out) => {
             if out.status.success() {
-                debug!("🔍 动态库编译成功");
+                debug!("动态库编译成功");
                 Ok(())
             } else {
                 let stderr = String::from_utf8_lossy(&out.stderr);
-                error!("❌ clang 编译报错:\n{stderr}");
+                error!("clang 编译报错:\n{stderr}");
                 Err(format!("clang 编译失败: {stderr}"))
             }
         }
         Err(e) => {
-            error!("❌ 无法启动 /usr/bin/clang: {e}");
+            error!("无法启动 /usr/bin/clang: {e}");
             Err(format!(
                 "无法执行 /usr/bin/clang，请先安装 Xcode Command Line Tools: {e}"
             ))
@@ -202,9 +193,9 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
         format_size(report.initial_size)
     );
 
-    // ! 步骤 0：打补丁前自动终止运行中的客户端进程，避免内核签名缓存冲突
+    // * 1. 终止运行中的客户端进程，避免内核签名缓存冲突
     let proc_name = app.process_name();
-    debug!("🔍 检查并终止运行中的客户端进程: {proc_name}");
+    debug!("检查并终止运行中的客户端进程: {proc_name}");
     let kill_res = Command::new("/usr/bin/killall")
         .arg("-9")
         .arg(proc_name)
@@ -217,21 +208,48 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    // ! 步骤 1：自动恢复历史残留的 .real 文件
-    let real_bin = app.real_binary_path();
-    let main_bin = app.binary_path();
-    if real_bin.exists() {
-        let real_name = real_bin.file_name().unwrap_or_default().to_string_lossy();
-        if let Err(e) = fs::rename(&real_bin, &main_bin) {
-            warn!("⚠️ 直接重命名失败，尝试强制覆写还原: {e}");
-            fs::copy(&real_bin, &main_bin).map_err(|e| format!("还原二进制失败: {e}"))?;
-            let _ = fs::remove_file(&real_bin);
+    // * 2. 移除无用组件（仅在实际有删除时打印）
+    if options.remove_bloatware {
+        match remove_bloatware(&app_path) {
+            Ok(removed) => {
+                if !removed.is_empty() {
+                    let sample = removed.join(", ");
+                    info!("已删除无用组件: {} 项 ({sample})", removed.len());
+                }
+                report.removed_components = removed;
+            }
+            Err(e) => warn!("移除部分组件时遇到错误: {e}"),
         }
-        report.restored_real = true;
-        info!("已还原历史残留备份: 「{real_name}」");
     }
 
-    // * 步骤 2：编译补丁与 Mach-O 尾部注入
+    // * 3. 精简 CEF 语言包与快照（仅在实际有删除时打印）
+    if options.prune_locales {
+        match prune_locales(&app_path) {
+            Ok(pruned) => {
+                if !pruned.is_empty() {
+                    let sample = pruned.join(", ");
+                    info!("已删除多余语言包与快照: {} 项 ({sample})", pruned.len());
+                }
+                report.pruned_locales = pruned;
+            }
+            Err(e) => warn!("精简语言包时遇到错误: {e}"),
+        }
+    }
+
+    // * 4. 剥离通用架构，提取纯 arm64 二进制（在注入前完成架构瘦身）
+    if options.thin_arm64 {
+        match thin_arm64_binaries(&app_path) {
+            Ok(count) => {
+                if count > 0 {
+                    info!("已完成纯 arm64 架构转换: {count} 个通用二进制");
+                }
+                report.thinned_count = count;
+            }
+            Err(e) => warn!("提取 arm64 架构时遇到错误: {e}"),
+        }
+    }
+
+    // * 5. 编译动态库并向纯 arm64 主二进制注入 LC_LOAD_DYLIB
     if options.core_patch {
         let temp_dylib =
             std::env::temp_dir().join(format!("libfutu_patch_{}.dylib", std::process::id()));
@@ -248,6 +266,7 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
         let _ = fs::remove_file(&temp_dylib);
 
         // * 执行纯 Rust Mach-O 尾部加载表注入
+        let main_bin = app.binary_path();
         match inject_file(&main_bin, "@rpath/libfutu_patch.dylib") {
             Ok(result) => {
                 report.inject_status = Some(result);
@@ -269,50 +288,9 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
         }
     }
 
-    // * 步骤 3：移除无用组件（仅在实际有删除时打印）
-    if options.remove_bloatware {
-        match remove_bloatware(&app_path) {
-            Ok(removed) => {
-                if !removed.is_empty() {
-                    let sample = removed.join(", ");
-                    info!("已删除无用组件: {} 项 ({sample})", removed.len());
-                }
-                report.removed_components = removed;
-            }
-            Err(e) => warn!("⚠️ 移除部分组件时遇到错误: {e}"),
-        }
-    }
-
-    // * 步骤 4：精简 CEF 语言包与快照（仅在实际有删除时打印）
-    if options.prune_locales {
-        match prune_locales(&app_path) {
-            Ok(pruned) => {
-                if !pruned.is_empty() {
-                    let sample = pruned.join(", ");
-                    info!("已删除多余语言包与快照: {} 项 ({sample})", pruned.len());
-                }
-                report.pruned_locales = pruned;
-            }
-            Err(e) => warn!("⚠️ 精简语言包时遇到错误: {e}"),
-        }
-    }
-
-    // * 步骤 5：剥离通用架构，提取纯 arm64 二进制（仅在数量大于 0 时打印）
-    if options.thin_arm64 {
-        match thin_arm64_binaries(&app_path) {
-            Ok(count) => {
-                if count > 0 {
-                    info!("已完成纯 arm64 架构转换: {count} 个通用二进制");
-                }
-                report.thinned_count = count;
-            }
-            Err(e) => warn!("⚠️ 提取 arm64 架构时遇到错误: {e}"),
-        }
-    }
-
-    // * 步骤 6：静默清除隔离属性并执行本地 Ad-hoc 重签名
+    // * 6. 静默清除隔离属性并执行本地 Ad-hoc 重签名
     if let Err(e) = resign_app(&app_path) {
-        warn!("⚠️ 重签名过程中发生警告: {e}");
+        warn!("重签名过程中发生警告: {e}");
     }
 
     report.final_size = calculate_dir_size(&app_path);
@@ -333,6 +311,6 @@ pub fn run_documents_clean() {
                 info!("已清理 ~/Documents 残留缓存: {} 个目录", paths.len());
             }
         }
-        Err(e) => warn!("⚠️ 清理 ~/Documents 时发生错误: {e}"),
+        Err(e) => warn!("清理 ~/Documents 时发生错误: {e}"),
     }
 }

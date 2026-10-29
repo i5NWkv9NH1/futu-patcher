@@ -3,7 +3,7 @@ name = "futu-patcher"
 version = "0.1.0"
 edition = "2024"
 authors = ["sora"]
-description = "macOS 富途客户端 (Futubull / FutuNiuniu) 净化与精简工具"
+description = "macOS 富途客户端 (Futubull / FutuNiuniu) 补丁与精简工具"
 repository = "https://github.com/i5NWkv9NH1/futu-patcher"
 
 [dependencies]
@@ -15,3 +15,6 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 walkdir = "2.5"
 thiserror = "1.0"
 libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"

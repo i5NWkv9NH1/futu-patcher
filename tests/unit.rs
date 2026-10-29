@@ -1,12 +1,14 @@
 // * futu-patcher 独立单元测试集合
 
 use clap::Parser;
-use futu_patcher::cleaner::{format_size, get_user_home_dir};
+use futu_patcher::cleaner::{format_size, get_user_home_dir, prune_locales, remove_bloatware};
 use futu_patcher::macho::{
     CPU_TYPE_ARM64, FAT_MAGIC, InjectResult, MH_MAGIC_64, MachoError, find_arm64_slice_offset,
     inject_slice,
 };
 use futu_patcher::{CliArgs, TargetArg};
+use std::fs;
+use tempfile::tempdir;
 
 // * 构造基础 64 位 Mach-O 内存切片用于测试
 fn create_mock_macho_64() -> Vec<u8> {
@@ -105,6 +107,96 @@ fn test_find_arm64_slice_in_fat() {
 
     let offset = find_arm64_slice_offset(&fat).expect("应正确解析 FAT 中的 arm64 切片");
     assert_eq!(offset, 0x2000);
+}
+
+#[test]
+fn test_find_arm64_slice_invalid_nfat_arch() {
+    // ! 场景 1：nfat_arch = 0
+    let mut fat_zero = vec![0u8; 1024];
+    fat_zero[0..4].copy_from_slice(&FAT_MAGIC.to_be_bytes());
+    fat_zero[4..8].copy_from_slice(&0u32.to_be_bytes());
+    assert!(matches!(
+        find_arm64_slice_offset(&fat_zero),
+        Err(MachoError::Corrupted(_))
+    ));
+
+    // ! 场景 2：nfat_arch > 8（模拟 Java .class 文件或损坏头部）
+    let mut fat_java = vec![0u8; 1024];
+    fat_java[0..4].copy_from_slice(&FAT_MAGIC.to_be_bytes());
+    fat_java[4..8].copy_from_slice(&52u32.to_be_bytes()); // * Java class 常见主版本号
+    assert!(matches!(
+        find_arm64_slice_offset(&fat_java),
+        Err(MachoError::Corrupted(_))
+    ));
+}
+
+#[test]
+fn test_remove_bloatware() {
+    let tmp = tempdir().expect("创建临时测试目录失败");
+    let fw_dir = tmp.path().join("Contents/Frameworks");
+    fs::create_dir_all(&fw_dir).unwrap();
+
+    let crash_reporter = fw_dir.join("CrashReporter.app");
+    fs::create_dir_all(&crash_reporter).unwrap();
+
+    let nn_python = fw_dir.join("NNPython.app");
+    fs::create_dir_all(&nn_python).unwrap();
+
+    let auto_test = fw_dir.join("libFTAutoTest.dylib");
+    fs::write(&auto_test, b"dummy").unwrap();
+
+    let trtc_driver = fw_dir
+        .join("TXLiteAVSDK_TRTC_Mac.framework/Versions/A/Resources/PlugIns/TRTCAudioPlugin.driver");
+    fs::create_dir_all(trtc_driver.parent().unwrap()).unwrap();
+    fs::write(&trtc_driver, b"dummy driver").unwrap();
+
+    // * 白名单保留项（绝不应被删除）
+    let keep_dylib = fw_dir.join("libFTKeep.dylib");
+    fs::write(&keep_dylib, b"keep me").unwrap();
+
+    let removed = remove_bloatware(tmp.path()).expect("清理无用组件执行成功");
+    assert_eq!(removed.len(), 4);
+    assert!(!crash_reporter.exists());
+    assert!(!nn_python.exists());
+    assert!(!auto_test.exists());
+    assert!(!trtc_driver.exists());
+    assert!(keep_dylib.exists());
+}
+
+#[test]
+fn test_prune_locales() {
+    let tmp = tempdir().expect("创建临时测试目录失败");
+    let cef_res = tmp
+        .path()
+        .join("Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Resources");
+    fs::create_dir_all(&cef_res).unwrap();
+
+    // * 需要被清理的无用语言包
+    let af_lproj = cef_res.join("af.lproj");
+    fs::create_dir_all(&af_lproj).unwrap();
+    let de_lproj = cef_res.join("de.lproj");
+    fs::create_dir_all(&de_lproj).unwrap();
+
+    // * 需要保留的语言包
+    let zh_lproj = cef_res.join("zh_CN.lproj");
+    fs::create_dir_all(&zh_lproj).unwrap();
+    let en_lproj = cef_res.join("en.lproj");
+    fs::create_dir_all(&en_lproj).unwrap();
+
+    // * 快照文件
+    let x86_bin = cef_res.join("v8_context_snapshot.x86_64.bin");
+    fs::write(&x86_bin, b"x86 snapshot").unwrap();
+    let arm64_bin = cef_res.join("v8_context_snapshot.arm64.bin");
+    fs::write(&arm64_bin, b"arm64 snapshot").unwrap();
+
+    let pruned = prune_locales(tmp.path()).expect("精简语言包执行成功");
+    assert_eq!(pruned.len(), 3);
+    assert!(!af_lproj.exists());
+    assert!(!de_lproj.exists());
+    assert!(!x86_bin.exists());
+    assert!(zh_lproj.exists());
+    assert!(en_lproj.exists());
+    assert!(arm64_bin.exists());
 }
 
 #[test]

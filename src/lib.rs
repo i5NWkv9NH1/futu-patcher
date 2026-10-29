@@ -8,6 +8,8 @@ use clap::{Parser, ValueEnum};
 use console::style;
 use dialoguer::{MultiSelect, Select};
 use patcher::{FutuApp, PatchOptions, PatchReport, run_documents_clean, run_pipeline_for_app};
+use std::path::PathBuf;
+use std::process::Command;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -72,6 +74,14 @@ pub struct CliArgs {
     #[arg(long = "no-docs", help = "跳过 ~/Documents 残留文件夹清理")]
     pub no_docs: bool,
 
+    // * 诊断模式：探测客户端结构与符号
+    #[arg(
+        short = 'i',
+        long = "inspect",
+        help = "诊断模式：探测 Futubull 客户端结构与导出符号"
+    )]
+    pub inspect: bool,
+
     // * 开启详细调试日志
     #[arg(short = 'v', long = "verbose", help = "输出底层详细执行日志")]
     pub verbose: bool,
@@ -107,7 +117,7 @@ pub fn check_root_privilege() {
     if !is_root {
         eprintln!(
             "{}",
-            style("⚠️ 提示: 修改 /Applications 下的富途客户端需要管理员权限，建议使用 sudo futu-patcher 运行！")
+            style("提示: 修改 /Applications 下的富途客户端需要管理员权限，建议使用 sudo futu-patcher 运行！")
                 .yellow()
                 .bold()
         );
@@ -146,10 +156,6 @@ pub fn print_summary_report(reports: &[PatchReport]) {
             cleaner::format_size(saved),
             percent
         );
-
-        if r.restored_real {
-            println!("  历史修复: {}", style("已还原残留 .real 二进制").yellow());
-        }
 
         if let Some(st) = r.inject_status {
             let desc = match st {
@@ -192,10 +198,191 @@ pub fn print_summary_report(reports: &[PatchReport]) {
     );
 }
 
+// * 诊断模式：探测 Futubull 客户端结构与导出符号
+pub fn run_inspect() {
+    let app_path = PathBuf::from("/Applications/Futubull.app");
+    if !app_path.exists() {
+        eprintln!(
+            "{}",
+            style("未在系统中检测到 /Applications/Futubull.app")
+                .red()
+                .bold()
+        );
+        return;
+    }
+
+    println!(
+        "{}",
+        style("==========================================================").dim()
+    );
+    println!(
+        "{}",
+        style("Futubull 客户端结构与符号诊断报告").cyan().bold()
+    );
+    println!(
+        "{}",
+        style("----------------------------------------------------------").dim()
+    );
+
+    // * 1. 读取版本号
+    let plist_path = app_path.join("Contents/Info.plist");
+    let version_cmd = Command::new("/usr/libexec/PlistBuddy")
+        .arg("-c")
+        .arg("Print :CFBundleShortVersionString")
+        .arg(&plist_path)
+        .output();
+    let build_cmd = Command::new("/usr/libexec/PlistBuddy")
+        .arg("-c")
+        .arg("Print :CFBundleVersion")
+        .arg(&plist_path)
+        .output();
+
+    let version_str = version_cmd
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "未知".to_string());
+
+    let build_str = build_cmd
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "未知".to_string());
+
+    println!(
+        "客户端版本: {} (Build {})",
+        style(&version_str).green().bold(),
+        build_str
+    );
+    println!("应用路径: {}", app_path.display());
+    println!();
+
+    // * 2. 扫描组件
+    println!("{}", style("主要组件列表 (按体积降序):").yellow().bold());
+    let scan_dirs = [
+        app_path.join("Contents/Frameworks"),
+        app_path.join("Contents/PlugIns"),
+        app_path.join("Contents/MacOS"),
+    ];
+
+    let mut components: Vec<(String, u64)> = Vec::new();
+    for dir in &scan_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".app")
+                    || name.ends_with(".framework")
+                    || name.ends_with(".dylib")
+                    || name.ends_with(".driver")
+                    || name.ends_with(".plugin")
+                {
+                    let size = if path.is_dir() {
+                        cleaner::calculate_dir_size(&path)
+                    } else {
+                        entry.metadata().map(|m| m.len()).unwrap_or(0)
+                    };
+                    components.push((name, size));
+                }
+            }
+        }
+    }
+
+    components.sort_by_key(|a| std::cmp::Reverse(a.1));
+    for (name, size) in &components {
+        println!(
+            "  - {:<48} {}",
+            name,
+            style(cleaner::format_size(*size)).dim()
+        );
+    }
+    println!();
+
+    // * 3. 动态库加载表 (otool -L FTNN)
+    println!("{}", style("主二进制 (FTNN) 动态库依赖表:").yellow().bold());
+    let main_bin = app_path.join("Contents/MacOS/FTNN");
+    let otool_res = Command::new("/usr/bin/otool")
+        .arg("-L")
+        .arg(&main_bin)
+        .output();
+    if let Ok(out) = otool_res {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for line in stdout.lines().skip(1) {
+            println!("  {}", line.trim());
+        }
+    }
+    println!();
+
+    // * 4. 符号扫描 (nm -gU)
+    println!(
+        "{}",
+        style("上报相关敏感符号扫描 (F3CReport / libFTApmKit):")
+            .yellow()
+            .bold()
+    );
+    let symbol_targets = [
+        (
+            "F3CReport",
+            app_path.join("Contents/Frameworks/F3CReport.framework/Versions/Current/F3CReport"),
+        ),
+        (
+            "libFTApmKit.dylib",
+            app_path.join("Contents/Frameworks/libFTApmKit.dylib"),
+        ),
+    ];
+
+    let keywords = ["Report", "Upload", "Init", "Flush", "Apm", "Crash", "Jank"];
+
+    for (target_name, bin_path) in &symbol_targets {
+        if !bin_path.exists() {
+            continue;
+        }
+        println!("  • [{}]:", target_name);
+        let nm_res = Command::new("/usr/bin/nm")
+            .arg("-gU")
+            .arg(bin_path)
+            .output();
+        if let Ok(out) = nm_res {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let mut matched_count = 0;
+            for line in stdout.lines() {
+                if keywords.iter().any(|&k| line.contains(k)) {
+                    let sym = line.split_whitespace().last().unwrap_or(line);
+                    println!("    {}", sym);
+                    matched_count += 1;
+                }
+            }
+            if matched_count == 0 {
+                println!("    (未检测到匹配符号)");
+            }
+        }
+    }
+    println!(
+        "{}",
+        style("==========================================================").dim()
+    );
+}
+
 // * 主流程执行入口
 pub fn run() {
     let args = CliArgs::parse();
     init_tracing(args.verbose);
+
+    // * 若开启诊断探测模式，执行后直接退出
+    if args.inspect {
+        run_inspect();
+        return;
+    }
 
     println!(
         "{}",
@@ -215,7 +402,7 @@ pub fn run() {
     if !futubull_installed && !futuniuniu_installed {
         eprintln!(
             "{}",
-            style("❌ 未在 /Applications 目录下检测到任何富途客户端！")
+            style("未在 /Applications 目录下检测到任何富途客户端！")
                 .red()
                 .bold()
         );
@@ -318,7 +505,7 @@ pub fn run() {
             Err(e) => {
                 eprintln!(
                     "{}",
-                    style(format!("❌ 处理客户端「{}」失败: {e}", app.display_name()))
+                    style(format!("处理客户端「{}」失败: {e}", app.display_name()))
                         .red()
                         .bold()
                 );

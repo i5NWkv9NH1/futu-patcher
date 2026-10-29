@@ -137,9 +137,9 @@ int my_connect(int socket, const struct sockaddr *address, socklen_t address_len
 }
 DYLD_INTERPOSE(my_connect, connect);
 
-// * 3. Cmd+Q 秒退守护机制
+// * 3. Cmd+Q 快速退出机制
 
-// * 强制退出看门狗后台线程
+// * 后台线程：等待 400 毫秒保存配置后直接退出进程
 static void *force_exit_watchdog(void *arg) {
     (void)arg;
     // ! 预留 400ms 给主线程写回必要的用户偏好与窗口状态，随后直接从内核层退出，杜绝 Dock 栏无响应卡死
@@ -148,7 +148,7 @@ static void *force_exit_watchdog(void *arg) {
     return NULL;
 }
 
-// * 启动退出看门狗
+// * 启动延迟退出机制
 static void start_exit_watchdog(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -287,8 +287,8 @@ static void init_patch(void) {
         return;
     }
 
-    // * 检查是否已经处于自举子进程环境
-    // ? 纯原生 Mach-O 注入时，dyld interpose 需要 DYLD_INSERT_LIBRARIES 激活，这里自举重启一次
+    // * 检查是否已激活补丁环境
+    // ? 纯原生 Mach-O 注入时，dyld interpose 需要 DYLD_INSERT_LIBRARIES 激活，这里通过环境变量重新加载一次当前进程
     if (!getenv("FUTU_PATCH_ACTIVE")) {
         setenv("FUTU_PATCH_ACTIVE", "1", 1);
         setenv("DYLD_INSERT_LIBRARIES", "/Applications/Futubull.app/Contents/Frameworks/libfutu_patch.dylib", 1);
@@ -298,10 +298,10 @@ static void init_patch(void) {
         }
     }
 
-    // * 自举完成后清除环境变量，避免污染后续派生的其他子进程
+    // * 重载完成后清除环境变量，避免污染后续派生的其他子进程
     unsetenv("DYLD_INSERT_LIBRARIES");
 
-    // * 挂载 AppKit 的 terminate: 方法以启动退出看门狗
+    // * 挂载 AppKit 的 terminate: 方法以启动快速退出机制
     Class appCls = objc_getClass("NSApplication");
     if (appCls) {
         Method m = class_getInstanceMethod(appCls, @selector(terminate:));

@@ -17,7 +17,7 @@ pub fn get_user_home_dir() -> PathBuf {
             let candidate = PathBuf::from(format!("/Users/{trimmed}"));
             if candidate.exists() {
                 debug!(
-                    "🔍 检测到 sudo 提权环境，真实用户目录: {}",
+                    "检测到 sudo 提权环境，真实用户目录: {}",
                     candidate.display()
                 );
                 return candidate;
@@ -74,7 +74,6 @@ pub fn remove_bloatware(app_path: &Path) -> Result<Vec<String>, std::io::Error> 
     let targets = [
         fw_dir.join("CrashReporter.app"),
         fw_dir.join("NNPython.app"),
-        fw_dir.join("FTNN.real Helper.app"),
         fw_dir.join("libFTAutoTest.dylib"),
         fw_dir.join(
             "TXLiteAVSDK_TRTC_Mac.framework/Versions/A/Resources/PlugIns/TRTCAudioPlugin.driver",
@@ -144,12 +143,12 @@ pub fn prune_locales(app_path: &Path) -> Result<Vec<String>, std::io::Error> {
 pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
     // ! 仅在 Apple Silicon (arm64/aarch64) 架构上执行
     if std::env::consts::ARCH != "aarch64" {
-        warn!("⚠️ 当前系统非 arm64 架构，跳过 lipo 精简");
+        warn!("当前系统非 arm64 架构，跳过 lipo 精简");
         return Ok(0);
     }
 
     let mut count = 0;
-    debug!("🔍 开始扫描 App 包内所有通用二进制文件...");
+    debug!("开始扫描 App 包内所有通用二进制文件");
 
     for entry in WalkDir::new(app_path).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -182,6 +181,10 @@ pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
             continue;
         }
         let nfat_arch = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize;
+        // ! 校验架构切片数量：边界在 1..=8 之间，防止与使用相同 0xCAFEBABE 魔数的 Java .class 文件冲突
+        if nfat_arch == 0 || nfat_arch > 8 {
+            continue;
+        }
         let mut has_arm64 = false;
         let mut offset = 8;
         for _ in 0..nfat_arch {
@@ -217,10 +220,10 @@ pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
         match output {
             Ok(out) if out.status.success() => {
                 count += 1;
-                debug!("🔍 转换为纯 arm64: {}", path.display());
+                debug!("转换为纯 arm64: {}", path.display());
             }
             _ => {
-                warn!("⚠️ lipo 转换失败: {}", path.display());
+                warn!("lipo 转换失败: {}", path.display());
             }
         }
     }
@@ -268,7 +271,7 @@ pub fn resign_app(app_path: &Path) -> Result<(), std::io::Error> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!("⚠️ codesign 签名异常: {stderr}");
+        warn!("codesign 签名异常: {stderr}");
     }
 
     Ok(())

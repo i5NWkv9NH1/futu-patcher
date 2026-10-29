@@ -166,6 +166,7 @@ dependencies = [
  "console",
  "dialoguer",
  "libc",
+ "tempfile",
  "thiserror",
  "tracing",
  "tracing-subscriber",
