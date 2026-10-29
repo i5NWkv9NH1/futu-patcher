@@ -144,7 +144,7 @@ pub fn prune_locales(app_path: &Path) -> Result<Vec<String>, std::io::Error> {
 pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
     // ! 仅在 Apple Silicon (arm64/aarch64) 架构上执行
     if std::env::consts::ARCH != "aarch64" {
-        warn!("⚠️ 当前系统非 arm64 架构，跳过 lipo 瘦身");
+        warn!("⚠️ 当前系统非 arm64 架构，跳过 lipo 精简");
         return Ok(0);
     }
 
@@ -205,7 +205,7 @@ pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
             continue;
         }
 
-        // * 调用系统的 lipo -thin arm64 进行原地瘦身
+        // * 调用系统的 lipo -thin arm64 进行原地精简
         let output = Command::new("/usr/bin/lipo")
             .arg("-thin")
             .arg("arm64")

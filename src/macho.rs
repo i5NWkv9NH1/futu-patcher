@@ -200,7 +200,7 @@ pub fn inject_slice(
                         }
 
                         // ! 如果不在末尾，将其从原位置抹去并前移后续命令
-                        warn!("⚠️ 检测到旧版错位项，正在剔除并重排加载命令表...");
+                        warn!("⚠️ 检测到错位项，正在剔除并重排加载命令表...");
                         let copy_src = cursor + cmdsize;
                         let copy_len = cmds_end - copy_src;
                         data.copy_within(copy_src..copy_src + copy_len, cursor);

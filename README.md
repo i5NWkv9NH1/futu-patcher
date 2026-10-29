@@ -1,17 +1,17 @@
-# futu-patcher: macOS 富途客户端净化与瘦身工具
+# futu-patcher: macOS 富途客户端净化与精简工具
 
 [简体中文](./README.md) | [English](./README_EN.md)
 
 > [!NOTE]
 > 本项目为个人自用工具，由 **Gemini 3.8 Flash** 与 **Gemini 4 Argon** 协助生成。
 
-基于 **Rust 2024 Edition** 构建的 macOS 富途客户端补丁与瘦身工具。解决富途后台频繁埋点、IMSDK 垃圾文件污染 `~/Documents`、安装包体积冗余以及 `Cmd+Q` 退出卡死问题。
+基于 **Rust 2024 Edition** 构建的 macOS 富途客户端补丁与精简工具。解决富途后台频繁埋点、IMSDK 垃圾文件污染 `~/Documents`、安装包体积冗余以及 `Cmd+Q` 退出卡死问题。
 
 ---
 
 ### 一、 客户端对比
 
-| 特性维度 | Futubull (新版长期维护版) | FutuNiuniu (旧版 legacy 原生版) |
+| 特性维度 | Futubull (富途牛牛新版) | FutuNiuniu (富途牛牛经典版) |
 | :--- | :--- | :--- |
 | **安装路径** | `/Applications/Futubull.app` | `/Applications/FutuNiuniu.app` |
 | **主二进制** | `FTNN` | `FutuNiuniu` |
@@ -19,7 +19,7 @@
 | **维护状态** | 官方持续维护 | 官方已停更 (`brew install --cask futubull@legacy`) |
 | **注入方式** | 纯 Rust Mach-O 尾部 `LC_LOAD_DYLIB` | 纯 Rust Mach-O 尾部 `LC_LOAD_DYLIB` (废除 `.real`) |
 | **拦截策略** | 屏蔽 `F3CReport` 与 `libFTApmKit` | 屏蔽 `F3CReport` 与 `Firebase` |
-| **瘦身收益** | **200MB ~ 400MB+** | **50MB ~ 100MB+** |
+| **精简收益** | **200MB ~ 400MB+** | **50MB ~ 100MB+** |
 
 ---
 

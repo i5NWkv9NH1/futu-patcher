@@ -3,7 +3,8 @@ name = "futu-patcher"
 version = "0.1.0"
 edition = "2024"
 authors = ["sora"]
-description = "macOS 富途客户端 (Futubull / FutuNiuniu) 净化与瘦身工具"
+description = "macOS 富途客户端 (Futubull / FutuNiuniu) 净化与精简工具"
+repository = "https://github.com/i5NWkv9NH1/futu-patcher"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

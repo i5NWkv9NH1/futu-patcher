@@ -11,16 +11,16 @@ use crate::cleaner::{
 };
 use crate::macho::{InjectResult, inject_file};
 
-// * 针对新版与旧版内嵌的 Objective-C 补丁源码
+// * 针对新版与经典版内嵌的 Objective-C 补丁源码
 const FUTUBULL_PATCH_SOURCE: &str = include_str!("../patches/futubull_patch.m");
 const FUTUNIUNIU_PATCH_SOURCE: &str = include_str!("../patches/futuniuniu_patch.m");
 
 // * 支持的目标富途客户端枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FutuApp {
-    // * 新版 Futubull (基于 Qt + CEF，主二进制为 FTNN)
+    // * Futubull (富途牛牛新版，基于 Qt + CEF，主二进制为 FTNN)
     Futubull,
-    // * 旧版 FutuNiuniu (Cocoa 原生版，主二进制为 FutuNiuniu)
+    // * FutuNiuniu (富途牛牛经典版，Cocoa 原生版，主二进制为 FutuNiuniu)
     FutuNiuniu,
 }
 
@@ -65,8 +65,8 @@ impl FutuApp {
     // * 客户端显示名称
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::Futubull => "Futubull (新版长期维护版)",
-            Self::FutuNiuniu => "FutuNiuniu (旧版 legacy 原生版)",
+            Self::Futubull => "Futubull (富途牛牛新版)",
+            Self::FutuNiuniu => "FutuNiuniu (富途牛牛经典版)",
         }
     }
 
@@ -183,7 +183,7 @@ pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(),
     }
 }
 
-// * 针对指定富途客户端执行补丁与瘦身处理
+// * 针对指定富途客户端执行补丁与精简处理
 pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<PatchReport, String> {
     if !app.is_installed() {
         return Err(format!("未在系统中检测到 {}", app.display_name()));
@@ -317,7 +317,7 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
 
     report.final_size = calculate_dir_size(&app_path);
     info!(
-        "处理完成: 「{}」 (瘦身后体积: {})",
+        "处理完成: 「{}」 (精简后体积: {})",
         app.display_name(),
         format_size(report.final_size)
     );

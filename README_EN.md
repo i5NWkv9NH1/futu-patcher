@@ -11,7 +11,7 @@ A clean, interactive CLI utility built with **Rust 2024 Edition** to patch and d
 
 ### 1. Client Comparison
 
-| Dimension | Futubull (Modern Long-Term Version) | FutuNiuniu (Legacy Cocoa Version) |
+| Dimension | Futubull (Modern Version) | FutuNiuniu (Classic Version) |
 | :--- | :--- | :--- |
 | **Bundle Path** | `/Applications/Futubull.app` | `/Applications/FutuNiuniu.app` |
 | **Main Binary** | `FTNN` | `FutuNiuniu` |

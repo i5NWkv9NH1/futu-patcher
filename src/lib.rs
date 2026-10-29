@@ -28,8 +28,8 @@ pub enum TargetArg {
     name = "futu-patcher",
     author = "sora",
     version,
-    about = "macOS 富途客户端 (Futubull / FutuNiuniu) 补丁与瘦身工具",
-    long_about = "解决富途客户端后台冗余上报、IMSDK 垃圾污染、体积庞大与退出卡死问题。\n支持新版 Futubull (Qt+CEF) 与旧版 FutuNiuniu (Cocoa legacy)。"
+    about = "macOS 富途客户端 (Futubull / FutuNiuniu) 补丁与精简工具",
+    long_about = "解决富途客户端后台冗余上报、IMSDK 垃圾污染、体积庞大与退出卡死问题。\n支持 Futubull (富途牛牛新版) 与 FutuNiuniu (富途牛牛经典版)。"
 )]
 pub struct CliArgs {
     // * 直接使用默认配置全自动运行（非交互静默模式）
@@ -169,7 +169,7 @@ pub fn print_summary_report(reports: &[PatchReport]) {
         }
 
         if r.thinned_count > 0 {
-            println!("  架构瘦身: {} 个二进制完成纯 arm64 转换", r.thinned_count);
+            println!("  架构精简: {} 个二进制完成纯 arm64 转换", r.thinned_count);
         }
 
         println!();
@@ -199,7 +199,7 @@ pub fn run() {
 
     println!(
         "{}",
-        style("富途客户端 (Futubull / FutuNiuniu) 补丁与瘦身工具 v0.1.0")
+        style("富途客户端 (Futubull / FutuNiuniu) 补丁与精简工具 v0.1.0")
             .bold()
             .cyan()
     );
