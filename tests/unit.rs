@@ -6,6 +6,7 @@ use futu_patcher::macho::{
     CPU_TYPE_ARM64, FAT_MAGIC, InjectResult, MH_MAGIC_64, MachoError, find_arm64_slice_offset,
     inject_slice,
 };
+use futu_patcher::patcher::{check_rustc_installed, resolve_rustc_binary};
 use futu_patcher::{CliArgs, TargetArg};
 use std::fs;
 use tempfile::tempdir;
@@ -243,4 +244,11 @@ fn test_cli_flags_toggle() {
     assert!(opts.prune_locales);
     assert!(opts.thin_arm64);
     assert!(!opts.clean_documents);
+}
+
+#[test]
+fn test_resolve_rustc_binary() {
+    let rustc = resolve_rustc_binary();
+    assert!(!rustc.as_os_str().is_empty());
+    assert!(check_rustc_installed());
 }

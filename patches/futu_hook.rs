@@ -560,6 +560,21 @@ fn patch_ft_apm() {
         patch_function_ret_zero(c"__ZN12CFTApmConfig22IsMemoryMetricsEnabledEv".as_ptr());
         patch_function_ret_zero(c"__ZN12CFTApmConfig27IsSceneLatencyReportEnabledEv".as_ptr());
         patch_function_ret_zero(c"__ZN12CFTApmConfig33IsTransactionLatencyReportEnabledEv".as_ptr());
+        patch_function_ret_zero(
+            c"__ZN8crashpad14CrashpadClient12StartHandlerERKN4base8FilePathES4_S4_RKNSt3__112basic_stringIcNS5_11char_traitsIcEENS5_9allocatorIcEEEESD_RKNS5_3mapISB_SB_NS5_4lessISB_EENS9_INS5_4pairISC_SB_EEEEEERKNS5_6vectorISB_NS9_ISB_EEEEbbRKNSN_IS2_NS9_IS2_EEEE"
+                .as_ptr(),
+        );
+        patch_function_ret(c"__ZN8crashpad8Settings17SetUploadsEnabledEb".as_ptr());
+        patch_function_ret(c"__ZN18FTApmErrorReporter10SetEnabledEb".as_ptr());
+        patch_function_ret(
+            c"__ZN24FTApmTimeMetricsReporter11ReportSceneERKN4core3apm5SceneE".as_ptr(),
+        );
+        patch_function_ret(
+            c"__ZN24FTApmTimeMetricsReporter17ReportTransactionERKN4core3apm11TransactionE".as_ptr(),
+        );
+        patch_function_ret(
+            c"__ZN4core3apm14error_reporter6ReportERKNS1_9ErrorDataE14ApmReportLevelb".as_ptr(),
+        );
     }
 }
 

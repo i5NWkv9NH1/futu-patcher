@@ -6,8 +6,8 @@ use std::process::Command;
 use tracing::{debug, error, info, warn};
 
 use crate::cleaner::{
-    calculate_dir_size, clean_user_documents, format_size, prune_locales, remove_bloatware,
-    resign_app, thin_arm64_binaries,
+    calculate_dir_size, clean_user_documents, format_size, get_user_home_dir, prune_locales,
+    remove_bloatware, resign_app, thin_arm64_binaries,
 };
 use crate::macho::{InjectResult, inject_file};
 
@@ -106,9 +106,20 @@ pub struct PatchReport {
     pub thinned_count: usize,
 }
 
+// * 解析 rustc 执行文件路径，兼容 sudo 下 rustup 用户的 ~/.cargo/bin/rustc
+pub fn resolve_rustc_binary() -> PathBuf {
+    let cargo_rustc = get_user_home_dir().join(".cargo/bin/rustc");
+    if cargo_rustc.exists() {
+        cargo_rustc
+    } else {
+        PathBuf::from("rustc")
+    }
+}
+
 // * 检查编译工具链 rustc 是否就绪
 pub fn check_rustc_installed() -> bool {
-    Command::new("rustc")
+    let rustc_bin = resolve_rustc_binary();
+    Command::new(&rustc_bin)
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -125,18 +136,22 @@ pub fn compile_patch_dylib(output_dylib: &Path) -> Result<(), String> {
         return Err(format!("写入临时补丁源码失败: {e}"));
     }
 
+    let rustc_bin = resolve_rustc_binary();
     debug!(
-        "调用 rustc 编译纯 Rust 补丁动态库: {}",
+        "调用 {} 编译纯 Rust 补丁动态库: {}",
+        rustc_bin.display(),
         output_dylib.display()
     );
 
     // * 使用 rustc 进行编译
-    let output = Command::new("rustc")
+    let output = Command::new(&rustc_bin)
         .arg("--edition=2024")
         .arg("--crate-type=cdylib")
         .arg("-O")
         .arg("-C")
         .arg("panic=abort")
+        .arg("-C")
+        .arg("strip=symbols")
         .arg("-C")
         .arg("link-arg=-Wl,-install_name,@rpath/libfutu_patch.dylib")
         .arg("-l")
