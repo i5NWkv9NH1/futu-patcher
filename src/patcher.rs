@@ -1,18 +1,19 @@
 // * 补丁安装与客户端处理流程模块
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::cleaner::{
-    calculate_dir_size, clean_user_documents, format_size, get_user_home_dir, prune_locales,
-    remove_bloatware, resign_app, thin_arm64_binaries,
+    calculate_dir_size, clean_user_documents, format_size, prune_locales, remove_bloatware,
+    resign_app, thin_arm64_binaries,
 };
 use crate::macho::{InjectResult, inject_file};
 
-// * 内嵌的纯 Rust 动态库补丁源码
-const PATCH_SOURCE: &str = include_str!("../patches/futu_hook.rs");
+// * 编译期内嵌的纯 Rust 补丁动态库二进制 (通过 build.rs 预编译)
+pub const PATCH_DYLIB_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/libfutu_patch.dylib"));
 
 // * 支持的目标富途客户端枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,86 +107,6 @@ pub struct PatchReport {
     pub thinned_count: usize,
 }
 
-// * 解析 rustc 执行文件路径，兼容 sudo 下 rustup 用户的 ~/.cargo/bin/rustc
-pub fn resolve_rustc_binary() -> PathBuf {
-    let cargo_rustc = get_user_home_dir().join(".cargo/bin/rustc");
-    if cargo_rustc.exists() {
-        cargo_rustc
-    } else {
-        PathBuf::from("rustc")
-    }
-}
-
-// * 检查编译工具链 rustc 是否就绪
-pub fn check_rustc_installed() -> bool {
-    let rustc_bin = resolve_rustc_binary();
-    Command::new(&rustc_bin)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-// * 编译内嵌的纯 Rust 补丁源码为动态库 libfutu_patch.dylib
-pub fn compile_patch_dylib(output_dylib: &Path) -> Result<(), String> {
-    let temp_dir = std::env::temp_dir();
-    let temp_src = temp_dir.join(format!("futu_hook_{}.rs", std::process::id()));
-
-    // * 将源码写出到临时目录
-    if let Err(e) = fs::write(&temp_src, PATCH_SOURCE) {
-        return Err(format!("写入临时补丁源码失败: {e}"));
-    }
-
-    let rustc_bin = resolve_rustc_binary();
-    debug!(
-        "调用 {} 编译纯 Rust 补丁动态库: {}",
-        rustc_bin.display(),
-        output_dylib.display()
-    );
-
-    // * 使用 rustc 进行编译
-    let output = Command::new(&rustc_bin)
-        .arg("--edition=2024")
-        .arg("--crate-type=cdylib")
-        .arg("-O")
-        .arg("-C")
-        .arg("panic=abort")
-        .arg("-C")
-        .arg("strip=symbols")
-        .arg("-C")
-        .arg("link-arg=-Wl,-install_name,@rpath/libfutu_patch.dylib")
-        .arg("-l")
-        .arg("objc")
-        .arg("-l")
-        .arg("framework=Foundation")
-        .arg("-l")
-        .arg("framework=AppKit")
-        .arg(&temp_src)
-        .arg("-o")
-        .arg(output_dylib)
-        .output();
-
-    // ! 无论成功与否，立即清理临时源码文件
-    let _ = fs::remove_file(&temp_src);
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                debug!("补丁动态库编译成功");
-                Ok(())
-            } else {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                error!("rustc 编译报错:\n{stderr}");
-                Err(format!("rustc 编译失败: {stderr}"))
-            }
-        }
-        Err(e) => {
-            error!("无法启动 rustc: {e}");
-            Err(format!("无法执行 rustc，请确保已安装 Rust 工具链: {e}"))
-        }
-    }
-}
-
 // * 针对指定富途客户端执行补丁与精简处理
 pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<PatchReport, String> {
     if !app.is_installed() {
@@ -261,22 +182,23 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
         }
     }
 
-    // * 5. 编译动态库并向纯 arm64 主二进制注入 LC_LOAD_DYLIB
+    // * 5. 部署预编译的动态库并向纯 arm64 主二进制注入 LC_LOAD_DYLIB
     if options.core_patch {
-        let temp_dylib =
-            std::env::temp_dir().join(format!("libfutu_patch_{}.dylib", std::process::id()));
-        compile_patch_dylib(&temp_dylib)?;
-
         // * 部署动态库到 App 的 Contents/Frameworks/ 目录
         let target_dylib = app.frameworks_path().join("libfutu_patch.dylib");
         let _ = fs::remove_file(&target_dylib);
-        if let Err(e) = fs::copy(&temp_dylib, &target_dylib) {
-            let _ = fs::remove_file(&temp_dylib);
+        if let Err(e) = fs::write(&target_dylib, PATCH_DYLIB_BYTES) {
             return Err(format!(
                 "部署动态库到 Frameworks 失败: {e} (请确认是否有管理员权限)"
             ));
         }
-        let _ = fs::remove_file(&temp_dylib);
+
+        // * 赋予 0o755 可执行权限
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&target_dylib, fs::Permissions::from_mode(0o755));
+        }
 
         // * 执行纯 Rust Mach-O 尾部加载表注入
         let main_bin = app.binary_path();

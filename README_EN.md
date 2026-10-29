@@ -35,6 +35,18 @@ A clean, interactive CLI utility built with **Rust 2024 Edition** to patch and d
 
 ### 3. Build & Run
 
+#### Option 1: One-line Quick Run (No Rust Required)
+
+```bash
+# Interactive run (all selected by default)
+curl -fsSL https://raw.githubusercontent.com/i5NWkv9NH1/futu-patcher/master/install.sh | bash
+
+# Non-interactive silent mode for all installed clients
+curl -fsSL https://raw.githubusercontent.com/i5NWkv9NH1/futu-patcher/master/install.sh | bash -s -- -y
+```
+
+#### Option 2: Build from Source
+
 ```bash
 # Build release binary
 cargo build --release

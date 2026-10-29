@@ -6,7 +6,7 @@ use futu_patcher::macho::{
     CPU_TYPE_ARM64, FAT_MAGIC, InjectResult, MH_MAGIC_64, MachoError, find_arm64_slice_offset,
     inject_slice,
 };
-use futu_patcher::patcher::{check_rustc_installed, resolve_rustc_binary};
+use futu_patcher::patcher::PATCH_DYLIB_BYTES;
 use futu_patcher::{CliArgs, TargetArg};
 use std::fs;
 use tempfile::tempdir;
@@ -247,8 +247,15 @@ fn test_cli_flags_toggle() {
 }
 
 #[test]
-fn test_resolve_rustc_binary() {
-    let rustc = resolve_rustc_binary();
-    assert!(!rustc.as_os_str().is_empty());
-    assert!(check_rustc_installed());
+fn test_patch_dylib_embedded() {
+    assert!(!PATCH_DYLIB_BYTES.is_empty());
+    // * 校验预编译动态库是否包含合法的 Mach-O 64 位魔数
+    assert!(PATCH_DYLIB_BYTES.len() >= 4);
+    let magic = u32::from_le_bytes([
+        PATCH_DYLIB_BYTES[0],
+        PATCH_DYLIB_BYTES[1],
+        PATCH_DYLIB_BYTES[2],
+        PATCH_DYLIB_BYTES[3],
+    ]);
+    assert_eq!(magic, MH_MAGIC_64);
 }

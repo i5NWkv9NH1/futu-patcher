@@ -35,6 +35,18 @@
 
 ### 三、 编译与运行
 
+#### 方式一：一行命令直接运行（无需安装 Rust 环境）
+
+```bash
+# 交互式运行 (默认全选)
+curl -fsSL https://raw.githubusercontent.com/i5NWkv9NH1/futu-patcher/master/install.sh | bash
+
+# 一键静默执行全部优化
+curl -fsSL https://raw.githubusercontent.com/i5NWkv9NH1/futu-patcher/master/install.sh | bash -s -- -y
+```
+
+#### 方式二：从源码编译运行
+
 ```bash
 # 编译发布版本
 cargo build --release
