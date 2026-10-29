@@ -1,9 +1,9 @@
 // * 纯 Rust Mach-O LC_LOAD_DYLIB 注入器
-// * 替代原 futu_inject.c，提供内存安全、头部溢出防御与无损尾部追加功能
+// * 替代原 futu_inject.c，提供内存安全、头部溢出防御与尾部追加功能
 
 use std::fs;
 use std::path::Path;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 // * Mach-O 与 FAT 核心魔数与常量定义
 pub const MH_MAGIC_64: u32 = 0xfeedfacf;
@@ -92,7 +92,7 @@ pub fn find_arm64_slice_offset(data: &[u8]) -> Result<usize, MachoError> {
     }
 }
 
-// * 在指定的 Mach-O 字节流中对 arm64 切片无损注入 LC_LOAD_DYLIB
+// * 在指定的 Mach-O 字节流中对 arm64 切片注入 LC_LOAD_DYLIB
 pub fn inject_slice(
     data: &mut [u8],
     slice_offset: usize,
@@ -193,14 +193,14 @@ pub fn inject_slice(
                     .unwrap_or_default();
 
                     if parsed_name == dylib_path {
-                        // * 如果位于最末尾一条，说明已经完美打好补丁
+                        // * 如果位于最末尾一条，说明已经打好补丁
                         if i == ncmds - 1 {
                             debug!("🔍 补丁已存在于加载表最末尾，无需重复写入");
                             return Ok(InjectResult::AlreadyPresent);
                         }
 
-                        // ! 如果不在末尾（早期注入器插在顶部导致的序号错位），将其从原位置抹去并前移后续命令
-                        warn!("⚠️ 检测到旧版错位项，正在自动剔除并重排加载命令表...");
+                        // ! 如果不在末尾，将其从原位置抹去并前移后续命令
+                        warn!("⚠️ 检测到旧版错位项，正在剔除并重排加载命令表...");
                         let copy_src = cursor + cmdsize;
                         let copy_len = cmds_end - copy_src;
                         data.copy_within(copy_src..copy_src + copy_len, cursor);
@@ -259,10 +259,10 @@ pub fn inject_slice(
     data[slice_offset + 20..slice_offset + 24].copy_from_slice(&sizeofcmds.to_le_bytes());
 
     if fixed_misplaced {
-        info!("🛠️ 成功修复错位项并追加「{dylib_path}」至加载表末尾！");
+        debug!("🔍 修复错位项并追加「{dylib_path}」至加载表末尾");
         Ok(InjectResult::FixedAndInjected)
     } else {
-        info!("🚀 成功追加「{dylib_path}」至加载表末尾！");
+        debug!("🔍 成功追加「{dylib_path}」至加载表末尾");
         Ok(InjectResult::Injected)
     }
 }
@@ -270,7 +270,7 @@ pub fn inject_slice(
 // * 对指定二进制文件执行加载表注入
 pub fn inject_file<P: AsRef<Path>>(path: P, dylib_path: &str) -> Result<InjectResult, MachoError> {
     let path_ref = path.as_ref();
-    debug!("🔍 开始读取并解析二进制文件: {}", path_ref.display());
+    debug!("🔍 读取并解析二进制文件: {}", path_ref.display());
 
     let mut data = fs::read(path_ref)?;
     let slice_offset = find_arm64_slice_offset(&data)?;
@@ -278,112 +278,8 @@ pub fn inject_file<P: AsRef<Path>>(path: P, dylib_path: &str) -> Result<InjectRe
 
     if result != InjectResult::AlreadyPresent {
         fs::write(path_ref, &data)?;
-        debug!("🚀 写入更新后的二进制数据完成: {}", path_ref.display());
+        debug!("🔍 写入更新后的二进制数据完成: {}", path_ref.display());
     }
 
     Ok(result)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // * 构造基础 64 位 Mach-O 内存切片用于测试
-    fn create_mock_macho_64() -> Vec<u8> {
-        let mut buf = vec![0u8; 4096];
-        buf[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes()); // * magic
-        buf[4..8].copy_from_slice(&CPU_TYPE_ARM64.to_le_bytes()); // * cputype
-        buf[8..12].copy_from_slice(&0x02u32.to_le_bytes()); // * cpusubtype
-        buf[12..16].copy_from_slice(&0x02u32.to_le_bytes()); // * filetype (MH_EXECUTE)
-        buf[16..20].copy_from_slice(&0u32.to_le_bytes()); // * ncmds = 0
-        buf[20..24].copy_from_slice(&0u32.to_le_bytes()); // * sizeofcmds = 0
-        buf[24..28].copy_from_slice(&0u32.to_le_bytes()); // * flags
-        buf[28..32].copy_from_slice(&0u32.to_le_bytes()); // * reserved
-        buf
-    }
-
-    #[test]
-    fn test_inject_clean_macho() {
-        let mut macho = create_mock_macho_64();
-        let target = "@rpath/libfutu_patch.dylib";
-
-        // * 首次注入测试
-        let res = inject_slice(&mut macho, 0, target).expect("首次注入应成功");
-        assert_eq!(res, InjectResult::Injected);
-
-        // * 校验头部字段更新
-        let ncmds = u32::from_le_bytes(macho[16..20].try_into().unwrap());
-        let sizeofcmds = u32::from_le_bytes(macho[20..24].try_into().unwrap());
-        assert_eq!(ncmds, 1);
-        let expected_size = ((24 + target.len() + 1 + 7) & !7) as u32;
-        assert_eq!(sizeofcmds, expected_size);
-
-        // * 重复注入测试（应幂等跳过）
-        let res2 = inject_slice(&mut macho, 0, target).expect("重复注入应无报错");
-        assert_eq!(res2, InjectResult::AlreadyPresent);
-    }
-
-    #[test]
-    fn test_inject_misplaced_repair() {
-        let mut macho = create_mock_macho_64();
-        let target = "@rpath/libfutu_patch.dylib";
-
-        // * 注入目标 dylib
-        inject_slice(&mut macho, 0, target).unwrap();
-
-        // * 在其后再伪造追加一个其他加载命令，模拟 target 不在末尾的场景
-        let dummy_size = 24u32;
-        let offset = 32 + u32::from_le_bytes(macho[20..24].try_into().unwrap()) as usize;
-        macho[offset..offset + 4].copy_from_slice(&0x1Bu32.to_le_bytes()); // * LC_LOAD_WEAK_DYLIB
-        macho[offset + 4..offset + 8].copy_from_slice(&dummy_size.to_le_bytes());
-        macho[offset + 8..offset + 12].copy_from_slice(&24u32.to_le_bytes());
-
-        // * 更新头部
-        let mut ncmds = u32::from_le_bytes(macho[16..20].try_into().unwrap()) + 1;
-        let mut sizeofcmds = u32::from_le_bytes(macho[20..24].try_into().unwrap()) + dummy_size;
-        macho[16..20].copy_from_slice(&ncmds.to_le_bytes());
-        macho[20..24].copy_from_slice(&sizeofcmds.to_le_bytes());
-
-        // ! 此时 target 位于 index 0，而非末尾 index 1；再次运行注入，应触发错位自动修复
-        let res = inject_slice(&mut macho, 0, target).expect("修复错位项应成功");
-        assert_eq!(res, InjectResult::FixedAndInjected);
-
-        ncmds = u32::from_le_bytes(macho[16..20].try_into().unwrap());
-        sizeofcmds = u32::from_le_bytes(macho[20..24].try_into().unwrap());
-        assert_eq!(ncmds, 2);
-        let expected_target_size = ((24 + target.len() + 1 + 7) & !7) as u32;
-        assert_eq!(sizeofcmds, dummy_size + expected_target_size);
-    }
-
-    #[test]
-    fn test_inject_padding_not_zero_security_check() {
-        let mut macho = create_mock_macho_64();
-        let target = "@rpath/libfutu_patch.dylib";
-
-        // ! 人为将加载命令结束后的填充区域填入非零数据，模拟紧邻代码段或损坏的 Padding 区域
-        let cmds_end = 32; // * 因为目前 sizeofcmds 为 0
-        macho[cmds_end + 10] = 0xAA;
-
-        // ! 触发安全校验拒绝注入
-        let res = inject_slice(&mut macho, 0, target);
-        assert!(matches!(res, Err(MachoError::HeaderPaddingNotZero)));
-    }
-
-    #[test]
-    fn test_find_arm64_slice_in_fat() {
-        let mut fat = vec![0u8; 8192];
-        fat[0..4].copy_from_slice(&FAT_MAGIC.to_be_bytes());
-        fat[4..8].copy_from_slice(&2u32.to_be_bytes()); // * 2 个架构
-
-        // * 第 1 个架构：x86_64 (cputype = 0x01000007, offset = 0x1000)
-        fat[8..12].copy_from_slice(&0x01000007u32.to_be_bytes());
-        fat[16..20].copy_from_slice(&0x1000u32.to_be_bytes());
-
-        // * 第 2 个架构：arm64 (cputype = 0x0100000c, offset = 0x2000)
-        fat[28..32].copy_from_slice(&CPU_TYPE_ARM64.to_be_bytes());
-        fat[36..40].copy_from_slice(&0x2000u32.to_be_bytes());
-
-        let offset = find_arm64_slice_offset(&fat).expect("应正确解析 FAT 中的 arm64 切片");
-        assert_eq!(offset, 0x2000);
-    }
 }

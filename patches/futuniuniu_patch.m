@@ -102,7 +102,7 @@ NSArray<NSString *> *my_NSSearchPathForDirectoriesInDomains(NSSearchPathDirector
 }
 DYLD_INTERPOSE(my_NSSearchPathForDirectoriesInDomains, NSSearchPathForDirectoriesInDomains);
 
-// * 2. 底层网络拦截（DNS 解析与直连 IP 双重网闸）
+// * 2. 拦截埋点网络请求 (DNS 解析与直连 IP)
 
 // * 拦截 DNS 域名解析，屏蔽埋点采集、崩溃分析与监控域名
 int my_getaddrinfo(const char *hostname, const char *servname, const struct addrinfo *hints, struct addrinfo **res) {

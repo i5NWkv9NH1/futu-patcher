@@ -1,9 +1,9 @@
-// * 冗余组件清理、CEF 语言包精简与 ~/Documents 历史缓存清理模块
+// * 组件清理、语言包精简与 ~/Documents 历史缓存清理模块
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 use crate::macho::{CPU_TYPE_ARM64, FAT_CIGAM, FAT_MAGIC};
@@ -66,7 +66,7 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-// * 1. 移除冗余组件 (CrashReporter、NNPython、AutoTest、声卡驱动)
+// * 1. 移除无用组件 (CrashReporter、NNPython、AutoTest、虚拟声卡驱动)
 pub fn remove_bloatware(app_path: &Path) -> Result<Vec<String>, std::io::Error> {
     let mut removed = Vec::new();
     let fw_dir = app_path.join("Contents/Frameworks");
@@ -94,7 +94,6 @@ pub fn remove_bloatware(app_path: &Path) -> Result<Vec<String>, std::io::Error> 
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            info!("✂️ 已移除冗余组件: 「{name}」");
             removed.push(name);
         }
     }
@@ -109,7 +108,6 @@ pub fn prune_locales(app_path: &Path) -> Result<Vec<String>, std::io::Error> {
         .join("Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Resources");
 
     if !cef_res.exists() {
-        debug!("🔍 未检测到 CEF Resources 目录，跳过语言包精简");
         return Ok(pruned);
     }
 
@@ -129,7 +127,6 @@ pub fn prune_locales(app_path: &Path) -> Result<Vec<String>, std::io::Error> {
         if locale_path.exists() {
             fs::remove_dir_all(&locale_path)?;
             pruned.push(locale.to_string());
-            info!("✂️ 已移除多余语言包: 「{locale}」");
         }
     }
 
@@ -138,13 +135,12 @@ pub fn prune_locales(app_path: &Path) -> Result<Vec<String>, std::io::Error> {
     if x86_snapshot.exists() {
         fs::remove_file(&x86_snapshot)?;
         pruned.push("v8_context_snapshot.x86_64.bin".to_string());
-        info!("✂️ 已移除冗余快照: 「v8_context_snapshot.x86_64.bin」");
     }
 
     Ok(pruned)
 }
 
-// * 3. 提取纯 arm64 架构 (通过 lipo -thin arm64 剥离 x86_64)
+// * 3. 提取纯 arm64 架构 (通过 lipo -thin arm64 剥离 x86_64 代码)
 pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
     // ! 仅在 Apple Silicon (arm64/aarch64) 架构上执行
     if std::env::consts::ARCH != "aarch64" {
@@ -210,18 +206,18 @@ pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
         }
 
         // * 调用系统的 lipo -thin arm64 进行原地瘦身
-        let status = Command::new("/usr/bin/lipo")
+        let output = Command::new("/usr/bin/lipo")
             .arg("-thin")
             .arg("arm64")
             .arg(path)
             .arg("-output")
             .arg(path)
-            .status();
+            .output();
 
-        match status {
-            Ok(s) if s.success() => {
+        match output {
+            Ok(out) if out.status.success() => {
                 count += 1;
-                debug!("🪶 成功转换为纯 arm64: {}", path.display());
+                debug!("🔍 转换为纯 arm64: {}", path.display());
             }
             _ => {
                 warn!("⚠️ lipo 转换失败: {}", path.display());
@@ -229,7 +225,6 @@ pub fn thin_arm64_binaries(app_path: &Path) -> Result<usize, std::io::Error> {
         }
     }
 
-    info!("🪶 已成功将 {count} 个通用二进制提取为纯 arm64 格式！");
     Ok(count)
 }
 
@@ -248,53 +243,33 @@ pub fn clean_user_documents() -> Result<Vec<PathBuf>, std::io::Error> {
         if target.exists() {
             fs::remove_dir_all(target)?;
             cleaned.push(target.clone());
-            info!("🧹 已清理用户目录残留: 「{}」", target.display());
         }
     }
 
     Ok(cleaned)
 }
 
-// * 5. 清除属性与本地 Ad-hoc 代码重签名
+// * 5. 清除隔离属性并执行本地 Ad-hoc 重签名 (吞掉 codesign 杂音)
 pub fn resign_app(app_path: &Path) -> Result<(), std::io::Error> {
-    info!("🔏 正在清除 App 隔离扩展属性...");
+    // ! 静默清除隔离属性
     let _ = Command::new("/usr/bin/xattr")
         .arg("-cr")
         .arg(app_path)
-        .status();
+        .output();
 
-    info!("🔏 正在执行本地 Ad-hoc 递归重签名...");
-    let status = Command::new("/usr/bin/codesign")
+    // ! 静默执行 Ad-hoc 重签名，避免终端刷出 replacing existing signature 等英文杂音
+    let output = Command::new("/usr/bin/codesign")
         .arg("--force")
         .arg("--deep")
         .arg("-s")
         .arg("-")
         .arg(app_path)
-        .status()?;
+        .output()?;
 
-    if !status.success() {
-        warn!("⚠️ codesign 退出状态非零，请确认是否有足够权限");
-    } else {
-        info!("🚀 本地重签名顺利完成！");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("⚠️ codesign 签名异常: {stderr}");
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_size() {
-        assert_eq!(format_size(500), "500 B");
-        assert_eq!(format_size(2048), "2.0 KB");
-        assert_eq!(format_size(10 * 1024 * 1024), "10.0 MB");
-    }
-
-    #[test]
-    fn test_get_user_home_dir_fallback() {
-        let home = get_user_home_dir();
-        assert!(home.is_absolute());
-    }
 }

@@ -1,4 +1,4 @@
-// * 核心补丁流水线与客户端治理模块
+// * 补丁安装与客户端处理流程模块
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -84,18 +84,18 @@ impl FutuApp {
     }
 }
 
-// * 补丁流水线配置参数（支持用户全选或自由单项组合）
+// * 补丁配置参数（支持全选或自由单项组合）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchOptions {
-    // * 1. 核心注入补丁 (IMSDK 沙盒隔离 + 网络双重网闸 + 内存防上报 + Cmd+Q 秒退看门狗)
+    // * 1. 注入补丁 (隔离文档目录 / 屏蔽埋点请求 / 修复 Cmd+Q 退出卡死)
     pub core_patch: bool,
-    // * 2. 移除冗余组件 (CrashReporter、NNPython、AutoTest 等)
+    // * 2. 删除无用组件 (CrashReporter / NNPython / AutoTest / 虚拟声卡)
     pub remove_bloatware: bool,
-    // * 3. 精简语言包与快照 (CEF 非必要语言包 + x86_64 快照)
+    // * 3. 删除多余语言包与 x86 快照
     pub prune_locales: bool,
-    // * 4. 提取纯 arm64 架构 (lipo 剥离 x86_64)
+    // * 4. 提取 arm64 架构 (lipo 移除 x86_64 代码)
     pub thin_arm64: bool,
-    // * 5. 清理历史残留目录 (~/Documents 垃圾目录)
+    // * 5. 清理 ~/Documents 残留文件夹
     pub clean_documents: bool,
 }
 
@@ -111,7 +111,7 @@ impl Default for PatchOptions {
     }
 }
 
-// * 流水线执行汇总统计
+// * 执行汇总统计
 #[derive(Debug, Default)]
 pub struct PatchReport {
     pub app_name: String,
@@ -143,9 +143,9 @@ pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(),
         return Err(format!("写入临时补丁源码失败: {e}"));
     }
 
-    debug!("🔍 正在调用 clang 编译动态库: {}", output_dylib.display());
+    debug!("🔍 调用 clang 编译动态库: {}", output_dylib.display());
 
-    // * 使用 /usr/bin/clang 进行最高优化级别编译
+    // * 使用 /usr/bin/clang 进行编译
     let output = Command::new("/usr/bin/clang")
         .arg("-O3")
         .arg("-dynamiclib")
@@ -166,7 +166,7 @@ pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(),
     match output {
         Ok(out) => {
             if out.status.success() {
-                debug!("🚀 补丁动态库编译成功");
+                debug!("🔍 动态库编译成功");
                 Ok(())
             } else {
                 let stderr = String::from_utf8_lossy(&out.stderr);
@@ -183,7 +183,7 @@ pub fn compile_patch_dylib(source_code: &str, output_dylib: &Path) -> Result<(),
     }
 }
 
-// * 针对指定富途客户端执行全套净化与瘦身流水线
+// * 针对指定富途客户端执行补丁与瘦身处理
 pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<PatchReport, String> {
     if !app.is_installed() {
         return Err(format!("未在系统中检测到 {}", app.display_name()));
@@ -197,12 +197,12 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
     let app_path = app.app_path();
     report.initial_size = calculate_dir_size(&app_path);
     info!(
-        "🚀 开始处理目标客户端: 「{}」 (当前体积: {})",
+        "处理客户端: 「{}」 (当前体积: {})",
         app.display_name(),
         format_size(report.initial_size)
     );
 
-    // ! 步骤 0：打补丁前自动终止运行中的客户端进程，杜绝 macOS 内核 vnode 签名缓存冲突
+    // ! 步骤 0：打补丁前自动终止运行中的客户端进程，避免内核签名缓存冲突
     let proc_name = app.process_name();
     debug!("🔍 检查并终止运行中的客户端进程: {proc_name}");
     let kill_res = Command::new("/usr/bin/killall")
@@ -212,31 +212,27 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
     if let Ok(out) = kill_res
         && out.status.success()
     {
-        info!("🛑 已成功终止正在运行的「{proc_name}」进程，避免内核签名缓存冲突");
-        // * 等待系统彻底释放文件句柄
+        info!("已终止正在运行的「{proc_name}」进程");
+        // * 等待系统释放文件句柄
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    // ! 步骤 1：自动恢复历史残留的 .real 文件（彻底终结旧版 bash 包装脚本）
+    // ! 步骤 1：自动恢复历史残留的 .real 文件
     let real_bin = app.real_binary_path();
     let main_bin = app.binary_path();
     if real_bin.exists() {
-        info!(
-            "🛠️ 检测到历史残留的备份文件「{}」，正在自动还原为真实主二进制...",
-            real_bin.file_name().unwrap_or_default().to_string_lossy()
-        );
+        let real_name = real_bin.file_name().unwrap_or_default().to_string_lossy();
         if let Err(e) = fs::rename(&real_bin, &main_bin) {
             warn!("⚠️ 直接重命名失败，尝试强制覆写还原: {e}");
             fs::copy(&real_bin, &main_bin).map_err(|e| format!("还原二进制失败: {e}"))?;
             let _ = fs::remove_file(&real_bin);
         }
         report.restored_real = true;
-        info!("🚀 历史残留 .real 二进制已成功恢复原位！");
+        info!("已还原历史残留备份: 「{real_name}」");
     }
 
-    // * 步骤 2：核心补丁编译与 Mach-O 尾部注入
+    // * 步骤 2：编译补丁与 Mach-O 尾部注入
     if options.core_patch {
-        info!("📦 正在编译高性能纯净动态库 (libfutu_patch.dylib)...");
         let temp_dylib =
             std::env::temp_dir().join(format!("libfutu_patch_{}.dylib", std::process::id()));
         compile_patch_dylib(app.patch_source(), &temp_dylib)?;
@@ -250,22 +246,20 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
             ));
         }
         let _ = fs::remove_file(&temp_dylib);
-        info!("📂 补丁动态库已部署至: 「{}」", target_dylib.display());
 
         // * 执行纯 Rust Mach-O 尾部加载表注入
-        info!("💉 正在对主二进制加载表追加写入 LC_LOAD_DYLIB...");
         match inject_file(&main_bin, "@rpath/libfutu_patch.dylib") {
             Ok(result) => {
                 report.inject_status = Some(result);
                 match result {
                     InjectResult::Injected => {
-                        info!("🚀 已成功追加 @rpath/libfutu_patch.dylib 至二进制加载表最末尾！")
+                        info!("已追加 @rpath/libfutu_patch.dylib 至加载表末尾")
                     }
                     InjectResult::AlreadyPresent => {
-                        info!("💡 动态库已位于加载表末尾，无需重复写入")
+                        info!("动态库已在加载表末尾，无需重复写入")
                     }
                     InjectResult::FixedAndInjected => {
-                        info!("🛠️ 成功移除历史错位项并重新写入末尾！")
+                        info!("已修复错位项并重写至加载表末尾")
                     }
                 }
             }
@@ -275,42 +269,55 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
         }
     }
 
-    // * 步骤 3：移除冗余无用组件
+    // * 步骤 3：移除无用组件（仅在实际有删除时打印）
     if options.remove_bloatware {
-        info!("✂️ 正在移除臃肿冗余组件...");
         match remove_bloatware(&app_path) {
-            Ok(removed) => report.removed_components = removed,
-            Err(e) => warn!("⚠️ 移除部分冗余组件时遇到错误: {e}"),
+            Ok(removed) => {
+                if !removed.is_empty() {
+                    let sample = removed.join(", ");
+                    info!("已删除无用组件: {} 项 ({sample})", removed.len());
+                }
+                report.removed_components = removed;
+            }
+            Err(e) => warn!("⚠️ 移除部分组件时遇到错误: {e}"),
         }
     }
 
-    // * 步骤 4：精简 CEF 语言包与快照
+    // * 步骤 4：精简 CEF 语言包与快照（仅在实际有删除时打印）
     if options.prune_locales {
-        info!("🌐 正在精简非必要语言包与多余快照...");
         match prune_locales(&app_path) {
-            Ok(pruned) => report.pruned_locales = pruned,
+            Ok(pruned) => {
+                if !pruned.is_empty() {
+                    let sample = pruned.join(", ");
+                    info!("已删除多余语言包与快照: {} 项 ({sample})", pruned.len());
+                }
+                report.pruned_locales = pruned;
+            }
             Err(e) => warn!("⚠️ 精简语言包时遇到错误: {e}"),
         }
     }
 
-    // * 步骤 5：剥离通用架构，提取纯 arm64 二进制
+    // * 步骤 5：剥离通用架构，提取纯 arm64 二进制（仅在数量大于 0 时打印）
     if options.thin_arm64 {
-        info!("🪶 正在检测并使用 lipo 提取纯 arm64 二进制...");
         match thin_arm64_binaries(&app_path) {
-            Ok(count) => report.thinned_count = count,
+            Ok(count) => {
+                if count > 0 {
+                    info!("已完成纯 arm64 架构转换: {count} 个通用二进制");
+                }
+                report.thinned_count = count;
+            }
             Err(e) => warn!("⚠️ 提取 arm64 架构时遇到错误: {e}"),
         }
     }
 
-    // * 步骤 6：本地 Ad-hoc 重签名与清理扩展属性
-    info!("🔏 正在进行本地 Ad-hoc 重签名...");
+    // * 步骤 6：静默清除隔离属性并执行本地 Ad-hoc 重签名
     if let Err(e) = resign_app(&app_path) {
         warn!("⚠️ 重签名过程中发生警告: {e}");
     }
 
     report.final_size = calculate_dir_size(&app_path);
     info!(
-        "🎉 「{}」流水线执行完毕！瘦身后体积: {}",
+        "处理完成: 「{}」 (瘦身后体积: {})",
         app.display_name(),
         format_size(report.final_size)
     );
@@ -320,13 +327,10 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
 
 // * 执行历史残留文档清理
 pub fn run_documents_clean() {
-    info!("🧹 正在扫描并清理 ~/Documents 历史残留缓存...");
     match clean_user_documents() {
         Ok(paths) => {
-            if paths.is_empty() {
-                debug!("🔍 未发现 ~/Documents 残留缓存");
-            } else {
-                info!("🚀 已成功清理 {} 个历史残留目录", paths.len());
+            if !paths.is_empty() {
+                info!("已清理 ~/Documents 残留缓存: {} 个目录", paths.len());
             }
         }
         Err(e) => warn!("⚠️ 清理 ~/Documents 时发生错误: {e}"),

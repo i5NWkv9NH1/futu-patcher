@@ -1,141 +1,58 @@
-# futu-patcher: macOS Futu Client Purifier and Debloater
+# futu-patcher: macOS 富途客户端净化与瘦身工具
 
-[English](./README.md) | [简体中文](./README_CN.md)
+[简体中文](./README.md) | [English](./README_EN.md)
 
 > [!NOTE]
-> This project is designed for personal use. Core implementation and project architecture were assisted by **Gemini 3.8 Flash** and **Gemini 4 Argon**.
+> 本项目为个人自用工具，由 **Gemini 3.8 Flash** 与 **Gemini 4 Argon** 协助生成。
 
-`futu-patcher` is an interactive CLI utility written in **Rust 2024 Edition** designed to debloat, sandbox, and optimize macOS Futu trading clients. It resolves issues regarding background telemetry, Tencent IMSDK dumping data in `~/Documents`, excessive universal binary sizes, and `Cmd+Q` termination lockups.
-
----
-
-### 1. Key Highlights & Problems Solved
-
-1. **Native Mach-O Injection (Farewell to `.real` Wrapper Scripts)**:
-   Completely removes the legacy hack of renaming binaries to `FutuNiuniu.real` and executing a wrapper script. Both `Futubull` and `FutuNiuniu` now use safe, pure-Rust **Mach-O `LC_LOAD_DYLIB` tail injection**. The embedded dylib bootstraps itself seamlessly via `execv`, ensuring `DYLD_INTERPOSE` hooks work properly while preserving the native process identity.
-2. **Process Pre-Termination Protection**:
-   Automatically terminates running `FTNN` or `FutuNiuniu` instances before applying patches, eliminating macOS kernel vnode code-signature caching conflicts.
-3. **Mach-O Header Padding Zero-Check**:
-   Strictly validates that destination bytes in the Mach-O header are all zero before appending `LC_LOAD_DYLIB`, preventing any accidental overwrite of subsequent code segments.
-4. **Dual Sandboxing for IMSDK and LocalizedString**:
-   Intercepts and redirects both `com_tencent_imsdk_data` and `LocalizedString` directories away from `~/Documents` into `~/Library/Application Support/.../SandboxedDocuments`.
-5. **Accurate User Home Resolution Under `sudo`**:
-   Inspects `SUDO_USER` to resolve the caller's actual `/Users/<username>` home path rather than defaulting to `/var/root`.
-6. **Dual-Layer Network Gateway (DNS & IP Interception)**:
-   Intercepts `getaddrinfo` and `connect` calls at the POSIX level to drop telemetry hostnames (`collect.*`, `apm.futu`, `crashlytics`, `firebase`, etc.) and block hardcoded direct reporting IPs (`42.193.128.62` and `129.226.79.246`).
-7. **Runtime Memory Patching**:
-   Automatically patches entry points of reporting engines (`F3CReport`, `libFTApmKit`, `Firebase`, `Crashlytics`) in memory with `RET` instructions to silence analytics.
-8. **Cmd+Q 400ms Fast Exit Watchdog**:
-   Eliminates Dock freezing upon quit by giving the main runloop 400ms to persist preferences before exiting through the kernel layer.
-9. **Comprehensive Debloating & Universal arm64 Thinning**:
-   Strips extra CEF language bundles, removes internal Python runtimes and test helpers, and executes `lipo -thin arm64` across all Universal binaries to reclaim hundreds of megabytes.
+基于 **Rust 2024 Edition** 构建的 macOS 富途客户端补丁与瘦身工具。解决富途后台频繁埋点、IMSDK 垃圾文件污染 `~/Documents`、安装包体积冗余以及 `Cmd+Q` 退出卡死问题。
 
 ---
 
-### 2. Client Comparison Matrix
+### 一、 客户端对比
 
-| Dimension | Futubull (Modern Long-Term Version) | FutuNiuniu (Legacy Cocoa Version) |
+| 特性维度 | Futubull (新版长期维护版) | FutuNiuniu (旧版 legacy 原生版) |
 | :--- | :--- | :--- |
-| **Bundle Path** | `/Applications/Futubull.app` | `/Applications/FutuNiuniu.app` |
-| **Main Binary** | `FTNN` | `FutuNiuniu` |
-| **Tech Stack** | Qt 5/6 + Chromium Embedded Framework (CEF) | Native macOS Cocoa (AppKit / Objective-C) |
-| **Official Maintenance** | Actively maintained by Futu | Discontinued (`brew install --cask futubull@legacy`) |
-| **Injection Method** | Pure Rust Mach-O `LC_LOAD_DYLIB` appended to load commands | Pure Rust Mach-O `LC_LOAD_DYLIB` appended to load commands |
-| **Network Gateway** | DNS blocking + Direct IP blocking | DNS blocking + Direct IP blocking |
-| **Memory Hooks** | Patches `F3CReport` & `libFTApmKit` | Patches `F3CReport` & `Firebase`/`GoogleDataTransport` |
-| **Disk Savings** | **200 MB ~ 400+ MB** (CEF locales, snapshots, Python, audio drivers, arm64 thinning) | **50 MB ~ 100+ MB** (arm64 thinning, cache cleanup) |
-| **Proxy Routing** | `PROCESS-NAME,FTNN,DIRECT` | `PROCESS-NAME,FutuNiuniu,DIRECT` |
+| **安装路径** | `/Applications/Futubull.app` | `/Applications/FutuNiuniu.app` |
+| **主二进制** | `FTNN` | `FutuNiuniu` |
+| **技术栈** | Qt 5/6 + CEF (Chromium) | 原生 macOS Cocoa (AppKit) |
+| **维护状态** | 官方持续维护 | 官方已停更 (`brew install --cask futubull@legacy`) |
+| **注入方式** | 纯 Rust Mach-O 尾部 `LC_LOAD_DYLIB` | 纯 Rust Mach-O 尾部 `LC_LOAD_DYLIB` (废除 `.real`) |
+| **拦截策略** | 屏蔽 `F3CReport` 与 `libFTApmKit` | 屏蔽 `F3CReport` 与 `Firebase` |
+| **瘦身收益** | **200MB ~ 400MB+** | **50MB ~ 100MB+** |
 
 ---
 
-### 3. Interactive Modules
+### 二、 核心功能
 
-Running `sudo futu-patcher` without arguments automatically launches an interactive multi-select menu (all enabled by default):
-
-```text
-[x] 1. Core Patch
-    - Sandbox redirection: Redirect com_tencent_imsdk_data & LocalizedString away from ~/Documents
-    - Network gateway: DNS & direct IP blocking for tracking and crash reports
-    - Memory hooks: Disable F3CReport, libFTApmKit, Firebase
-    - Exit watchdog: 400ms clean quit on Cmd+Q
-[x] 2. Remove Bloatware
-    - Remove CrashReporter.app, NNPython.app, libFTAutoTest.dylib, and audio drivers
-[x] 3. Prune Locales & Snapshots
-    - Remove unnecessary CEF locales (af, de, en_GB, fr, ja, ko, ms.lproj) and x86_64 snapshots
-[x] 4. Thin arm64 (via lipo)
-    - Strip x86_64 architecture from Universal Mach-O binaries on Apple Silicon
-[x] 5. Clean Documents
-    - Remove residual ~/Documents/com_tencent_imsdk_data and LocalizedString directories
-```
-
-After applying modifications, the tool clears quarantine flags (`xattr -cr`), re-signs the application with ad-hoc signatures (`codesign --force --deep -s -`), and prints disk space statistics.
+1. **注入补丁**：将 `com_tencent_imsdk_data` 与 `LocalizedString` 重定向至沙盒目录，拦截 DNS 与 IP 埋点，内存屏蔽上报逻辑，400ms 看门狗解决 `Cmd+Q` 卡死。
+2. **删除无用组件**：删除 `CrashReporter.app`、`NNPython.app`、`libFTAutoTest.dylib` 与虚拟声卡驱动。
+3. **删除多余语言包与快照**：删除 CEF 冗余多国语言包与 x86_64 架构 V8 快照。
+4. **提取 arm64 架构**：调用 `lipo -thin arm64` 剥离通用二进制中的 `x86_64` 代码。
+5. **清理残留文件夹**：读取 `SUDO_USER` 真实主目录，清理 `~/Documents` 下的遗留缓存。
 
 ---
 
-### 4. Getting Started
-
-#### 1. Build and Run
-
-Run via Cargo or with the included Fish 4.9 helper script:
-
-```fish
-# One-command build and elevated launch with Fish
-./run.fish
-```
-
-Or using Cargo:
+### 三、 编译与运行
 
 ```bash
+# 编译发布版本
 cargo build --release
+
+# 交互模式运行 (默认全选)
 sudo ./target/release/futu-patcher
-```
 
-#### 2. Non-Interactive Silent Mode
-
-Run across all installed clients with all default optimizations:
-
-```bash
-sudo ./target/release/futu-patcher --yes
-```
-
-#### 3. CLI Flags
-
-```bash
-# Target only Futubull with all defaults
-sudo ./target/release/futu-patcher -t futubull -y
-
-# Target only FutuNiuniu with all defaults
-sudo ./target/release/futu-patcher -t futuniuniu -y
-
-# Apply core injection patch only, skipping file removal
-sudo ./target/release/futu-patcher -y --no-bloat --no-locales --no-thin --no-docs
-
-# Enable verbose logging
-sudo ./target/release/futu-patcher -v
+# 一键静默全自动处理已安装客户端
+sudo ./target/release/futu-patcher -y
 ```
 
 ---
 
-### 5. Repository Structure
+### 四、 代理分流规则
+
+客户端打补丁后维持官方原生进程名不变，Surge / Clash 分流规则直接配置如下：
 
 ```text
-futu-patcher/
-├── Cargo.toml                  # Rust 2024 CLI project manifest (clap, dialoguer, console)
-├── README.md                   # English documentation (GitHub default)
-├── README_CN.md                # Simplified Chinese documentation
-├── run.fish                    # Fish 4.9 build & run helper
-├── patches/                    # Embedded Objective-C injection payloads
-│   ├── futubull_patch.m        # Patch source for Futubull (FTNN)
-│   └── futuniuniu_patch.m      # Patch source for legacy FutuNiuniu
-└── src/
-    ├── main.rs                 # CLI entry point: Interactive menu & argument parsing
-    ├── macho.rs                # Pure Rust Mach-O LC_LOAD_DYLIB lossless injector
-    ├── patcher.rs              # Execution pipeline: kill proc -> restore .real -> compile -> inject -> prune -> lipo -> sign
-    └── cleaner.rs              # Component remover, CEF locale pruner, SUDO_USER ~/Documents cleaner
+PROCESS-NAME,FTNN,DIRECT
+PROCESS-NAME,FutuNiuniu,DIRECT
 ```
-
----
-
-### 6. Disclaimer
-
-This utility is developed for personal educational, system-cleaning, and software maintenance purposes on local systems only. No warranty is provided.
