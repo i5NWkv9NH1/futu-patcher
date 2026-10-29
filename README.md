@@ -66,6 +66,6 @@ PROCESS-NAME,FutuNiuniu,DIRECT
 
 当富途牛牛新版更新后，可通过诊断模式辅助定位变动：
 
-1. **探测新版结构**：运行 `./target/release/futu-patcher -i`，工具会自动读取版本号、统计包内组件体积、导出 `FTNN` 依赖列表，并扫描 `F3CReport` 与 `libFTApmKit` 内部的上报与监控符号。
+1. **探测新版结构**：运行 `./target/release/futu-patcher -i`，工具会自动读取版本号、统计包内组件体积、导出 `FTNN` 依赖列表，并扫描 `F3CReport`、`libFTApmKit` 与 `F3CLogUploader` 内部的上报与监控符号。
 2. **核对符号变动**：若富途调整了埋点函数命名，将诊断输出中的新符号同步更新至 `patches/futubull_patch.m` 的 `on_image_loaded` 逻辑中。
 3. **重新打补丁**：运行 `sudo futu-patcher` 即可自动完成编译与注入。

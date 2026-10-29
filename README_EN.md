@@ -66,6 +66,6 @@ PROCESS-NAME,FutuNiuniu,DIRECT
 
 When Futubull updates, use diagnostics mode to inspect bundle changes:
 
-1. **Inspect Bundle**: Run `./target/release/futu-patcher -i`. The tool displays bundle version, sizes of internal components, `FTNN` dependencies, and telemetry symbols in `F3CReport` and `libFTApmKit`.
+1. **Inspect Bundle**: Run `./target/release/futu-patcher -i`. The tool displays bundle version, sizes of internal components, `FTNN` dependencies, and telemetry symbols in `F3CReport`, `libFTApmKit`, and `F3CLogUploader`.
 2. **Review Symbols**: If Futu changed telemetry function names, update the matched symbol names in `patches/futubull_patch.m`.
 3. **Re-apply Patch**: Run `sudo futu-patcher` to compile and apply patches.

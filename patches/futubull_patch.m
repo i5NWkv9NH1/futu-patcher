@@ -248,12 +248,19 @@ static void on_image_loaded(const struct mach_header *mh, intptr_t vmaddr_slide)
     // * 1. 屏蔽 F3CReport 埋点上报调度与退出刷新逻辑（防止退出死锁）
     if (!g_f3c_patched && strstr(info.dli_fname, "F3CReport")) {
         g_f3c_patched = true;
+        patch_function_ret("__ZN9f3creport4InitEv");
+        patch_function_ret("__ZN9f3creport15IFTClientReport4InitEv");
         patch_function_ret("__ZN9f3creport14ReportSchedule4InitEv");
         patch_function_ret("__ZN9f3creport14ReportSchedule6UninitEv");
         patch_function_ret("__ZN9f3creport14ReportSchedule5FlushENS_9FlushModeE");
         patch_function_ret("__ZN9f3creport14ReportSchedule13BasicUploader6UploadEv");
         patch_function_ret("__ZN9f3creport14ReportSchedule13BasicUploader9AddRecordERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");
         patch_function_ret("__ZN9f3creport14ReportSchedule9AddRecordEiNS_14RecordCategoryERKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEE");
+        patch_function_ret("__ZN9f3creport15FAPMReportAgent8DoReportERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEES9_S9_S9_b");
+        patch_function_ret("__ZN9f3creport20FTNetReportAgentImpl10ReportFAPMERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEES9_S9_S9_b");
+        patch_function_ret("__ZN9f3creport20FTNetReportAgentImpl11ReportTrackERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEiS9_ib");
+        patch_function_ret("__ZN9f3creport20FTNetReportAgentImpl12ReportFTraceERKN6f3cnet10FTraceInfoE");
+        patch_function_ret("__ZN9f3creport21AddEventMonitorReportERKNS_22EventMonitorReportDataE");
         patch_function_ret("__ZN9f3creport9Dump2File4InitEv");
         patch_function_ret("__ZN9f3creport9Dump2File6UninitEv");
         patch_function_ret("__ZN9f3creport9Dump2File10FileHelper5WriteEPKcj");
@@ -265,6 +272,20 @@ static void on_image_loaded(const struct mach_header *mh, intptr_t vmaddr_slide)
     // * 2. 彻底禁用 libFTApmKit.dylib 性能采集与卡顿监控
     if (!g_apm_patched && strstr(info.dli_fname, "libFTApmKit.dylib")) {
         g_apm_patched = true;
+        patch_function_ret("__ZN5ftapm4InitEv");
+        patch_function_ret("__ZN5ftapm14InitAfterLoginEv");
+        patch_function_ret("__ZN13IFTApmManager4InitEv");
+        patch_function_ret("__ZN13IFTApmManager15StartJankDetectEv");
+        patch_function_ret("__ZN13CFTApmManager13InitApmConfigEv");
+        patch_function_ret("__ZN13CFTApmManager15StartJankDetectEv");
+        patch_function_ret("__ZN13CFTApmManager18StartMemoryMonitorEv");
+        patch_function_ret("__ZN13CFTApmManager28AsyncInitApmConfigAfterLoginEv");
+        patch_function_ret("__ZN16FTUiJankDetector5StartERK18UiJankDetectOption");
+        patch_function_ret("__ZN18UiJankDetectThread5StartEv");
+        patch_function_ret("__ZN19CFTApmMemoryMonitor5StartERK19MemoryMonitorOption");
+        patch_function_ret("__ZN24CFTApmPerformanceMonitor5StartERK18UiJankDetectOption");
+        patch_function_ret("__ZN25CFTApmMemoryMonitorWorker5StartERK19MemoryMonitorOption");
+        patch_function_ret("__ZN16CFTCrashReporter4InitERK19CrashReporterConfig");
         patch_function_ret("__Z17InitCrashReporterv");
         patch_function_ret("__ZN12CFTApmConfig16UpdateFromServerEv");
         patch_function_ret("__ZN12CFTApmConfig19TryUpdateFromServerEv");

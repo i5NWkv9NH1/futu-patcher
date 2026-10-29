@@ -257,6 +257,7 @@ pub fn run_pipeline_for_app(app: FutuApp, options: &PatchOptions) -> Result<Patc
 
         // * 部署动态库到 App 的 Contents/Frameworks/ 目录
         let target_dylib = app.frameworks_path().join("libfutu_patch.dylib");
+        let _ = fs::remove_file(&target_dylib);
         if let Err(e) = fs::copy(&temp_dylib, &target_dylib) {
             let _ = fs::remove_file(&temp_dylib);
             return Err(format!(

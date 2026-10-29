@@ -326,7 +326,7 @@ pub fn run_inspect() {
     // * 4. 符号扫描 (nm -gU)
     println!(
         "{}",
-        style("上报相关敏感符号扫描 (F3CReport / libFTApmKit):")
+        style("上报相关敏感符号扫描 (F3CReport / libFTApmKit / F3CLogUploader):")
             .yellow()
             .bold()
     );
@@ -338,6 +338,12 @@ pub fn run_inspect() {
         (
             "libFTApmKit.dylib",
             app_path.join("Contents/Frameworks/libFTApmKit.dylib"),
+        ),
+        (
+            "F3CLogUploader",
+            app_path.join(
+                "Contents/Frameworks/F3CLogUploader.framework/Versions/Current/F3CLogUploader",
+            ),
         ),
     ];
 
@@ -358,6 +364,18 @@ pub fn run_inspect() {
             for line in stdout.lines() {
                 if keywords.iter().any(|&k| line.contains(k)) {
                     let sym = line.split_whitespace().last().unwrap_or(line);
+                    // ! 过滤虚函数表与类型信息等非执行函数符号
+                    if sym.starts_with("__ZTI")
+                        || sym.starts_with("__ZTS")
+                        || sym.starts_with("__ZTV")
+                        || sym.starts_with("__ZThn")
+                        || sym.starts_with("_ZTI")
+                        || sym.starts_with("_ZTS")
+                        || sym.starts_with("_ZTV")
+                        || sym.starts_with("_ZThn")
+                    {
+                        continue;
+                    }
                     println!("    {}", sym);
                     matched_count += 1;
                 }
